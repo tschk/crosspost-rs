@@ -1,0 +1,32 @@
+[package]
+name = "crosspost-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "crosspost-server"
+path = "src/main.rs"
+
+[dependencies]
+crosspost-core = { path = "../core" }
+crosspost-auth = { path = "../auth" }
+crosspost-db = { path = "../db" }
+crosspost-platforms = { path = "../platforms" }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+config = { workspace = true }
+dotenvy = { workspace = true }
+governor = { workspace = true }

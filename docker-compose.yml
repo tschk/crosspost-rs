@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  crosspost-api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - SERVER__HOST=0.0.0.0
+      - SERVER__PORT=3000
+      - SERVER__BASE_URL=http://localhost:3000
+      - DATABASE__SURREALDB_URL=ws://surrealdb:8000
+      - DATABASE__ROCKSDB_PATH=/app/data/rocksdb
+      - RUST_LOG=info
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - surrealdb
+
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    ports:
+      - "8000:8000"
+    command: start --log trace --user root --pass root memory
+    volumes:
+      - surrealdb-data:/data
+
+volumes:
+  surrealdb-data:

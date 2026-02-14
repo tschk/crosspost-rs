@@ -1,0 +1,62 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/auth",
+    "crates/db",
+    "crates/platforms",
+    "crates/api",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Crosspost Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/GraftAI-com/crosspost-rs"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+tokio-util = "0.7"
+
+# Web framework
+axum = { version = "0.8", features = ["macros", "multipart"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database
+surrealdb = { version = "2.2", features = ["kv-rocksdb"] }
+
+# OAuth2
+oauth2 = "4.4"
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Config
+config = "0.14"
+dotenvy = "0.15"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Validation
+validator = { version = "0.18", features = ["derive"] }
+
+# Security
+argon2 = "0.5"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Rate limiting
+governor = "0.7"

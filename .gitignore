@@ -70,3 +70,21 @@ tests/fixtures/typescript-project/index.js
 dist/env.js
 
 tmp
+
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# Database
+/data
+*.db
+*.rocksdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

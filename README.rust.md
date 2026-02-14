@@ -1,302 +1,476 @@
-# Crosspost Rust - Multi-Tenant Social Media Posting Platform
+# Crosspost-RS
 
-A complete rewrite of the JavaScript crosspost library into Rust, designed as a multi-tenant SaaS platform for marketing agencies.
+🚀 **Multi-tenant SaaS platform for cross-posting content to social media** - Rust rewrite of the popular [crosspost library](https://github.com/humanwhocodes/crosspost)
 
-## Overview
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.83%2B-orange.svg)](https://www.rust-lang.org)
+[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)]()
 
-Crosspost Rust is a comprehensive social media management platform that allows marketing agencies to manage multiple clients (tenants), with each client having multiple team members who can connect and post to multiple social media accounts per platform.
+---
 
-## Features
+## ⚠️ Project Status: Alpha (Foundation Complete)
 
-- **Multi-Tenant Architecture**: Complete isolation between different marketing agency clients
-- **OAuth2 Integration**: Support for 10+ social media platforms with automatic token refresh
-- **Multiple Accounts per Platform**: Users can connect multiple accounts from the same platform (e.g., 3 different Twitter accounts)
-- **Crossposting**: Post to multiple platforms and accounts simultaneously
-- **Scheduled Posts**: Schedule content for future publishing
-- **Rate Limiting**: Per-platform rate limit tracking
-- **Token Management**: Automatic token refresh before expiry
-- **Secure Storage**: Encrypted token storage in SurrealDB
+This is an **active rewrite** from JavaScript to Rust. The foundation is complete (~20% of planned features), but significant work remains. See [TODO.md](TODO.md) for the complete task list and progress.
 
-## Supported Platforms
+**Current Capabilities:**
+- ✅ Core types and error handling
+- ✅ Database layer (SurrealDB + RocksDB)
+- ✅ Basic OAuth structure
+- ✅ API framework with Axum
+- ✅ Docker deployment setup
+- 🚧 Platform integrations (partial)
+- 📋 Rate limiting (planned)
+- 📋 Scheduling (planned)
+- 📋 Production testing (planned)
 
-- Twitter/X (OAuth 2.0)
-- Facebook (Meta Graph API OAuth 2.0)
-- Instagram (Meta Graph API OAuth 2.0)
-- LinkedIn (OAuth 2.0)
-- YouTube (Google OAuth 2.0)
-- TikTok (OAuth 2.0)
-- Reddit (OAuth 2.0)
-- Twitch (OAuth 2.0)
-- Slack (OAuth 2.0)
-- Telegram (Bot API)
+**See [TODO.md](TODO.md) for detailed implementation status and roadmap.**
 
-## Tech Stack
+---
 
-- **Web Framework**: Axum
-- **Primary Database**: SurrealDB (for user data, tenant info, OAuth tokens, post history)
-- **Cache Layer**: RocksDB (for fast token lookups, rate limit tracking)
-- **OAuth**: oauth2 crate
-- **Async Runtime**: Tokio
+## 🎯 Overview
 
-## Project Structure
+Crosspost-RS is a complete rewrite and expansion of the original JavaScript crosspost library, transforming it from a simple utility into a production-ready multi-tenant SaaS platform. Built for marketing agencies managing multiple clients, each with multiple social media accounts.
+
+### Key Differences from JavaScript Version
+
+| Feature | JavaScript Library | Rust SaaS Platform |
+|---------|-------------------|-------------------|
+| Architecture | Single-user library | Multi-tenant SaaS |
+| Auth | API keys/tokens | OAuth2 flows |
+| Storage | None | SurrealDB + RocksDB |
+| Accounts | One per platform | Multiple per platform per user |
+| Deployment | NPM package | Docker containers |
+| API | Client library | REST API |
+| Scheduling | None | Built-in scheduler |
+| Rate Limiting | Manual | Automatic per-platform |
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     Axum API Server                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
+│  │   OAuth      │  │   Posting    │  │  Scheduling  │ │
+│  │  Endpoints   │  │  Endpoints   │  │  Endpoints   │ │
+│  └──────────────┘  └──────────────┘  └──────────────┘ │
+└─────────────────────────────────────────────────────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+  ┌─────▼─────┐      ┌──────▼──────┐     ┌─────▼─────┐
+  │ SurrealDB │      │  RocksDB    │     │ Platform  │
+  │           │      │             │     │  Clients  │
+  │ • Users   │      │ • Tokens    │     │           │
+  │ • Tenants │      │ • Rate      │     │ Twitter   │
+  │ • Accounts│      │   Limits    │     │ Facebook  │
+  │ • Posts   │      │             │     │ Instagram │
+  └───────────┘      └─────────────┘     │ LinkedIn  │
+                                          │ YouTube   │
+                                          │ TikTok    │
+                                          │ Reddit    │
+                                          │ Twitch    │
+                                          │ Slack     │
+                                          │ Telegram  │
+                                          └───────────┘
+```
+
+### Crate Structure
 
 ```
 crosspost-rs/
-├── Cargo.toml              # Workspace configuration
 ├── crates/
-│   ├── core/               # Shared types, errors, config
-│   ├── auth/               # OAuth2 handlers, token management
-│   ├── db/                 # SurrealDB + RocksDB integration
-│   ├── platforms/          # Platform-specific API clients
-│   └── api/                # Axum routes, middleware, handlers
-├── migrations/             # Database migrations
-├── Dockerfile              # Docker build configuration
-├── docker-compose.yml      # Docker Compose setup
-└── README.md
+│   ├── core/           # Shared types, errors, config (267 lines)
+│   ├── auth/           # OAuth2, token management (250 lines)
+│   ├── db/             # SurrealDB + RocksDB clients (370 lines)
+│   ├── platforms/      # Platform API clients (290 lines)
+│   └── api/            # Axum server & endpoints (560 lines)
+├── migrations/         # Database migrations (planned)
+├── Dockerfile          # Production container
+├── docker-compose.yml  # Local development
+└── TODO.md            # Complete task list
 ```
 
-## Getting Started
+---
+
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Rust 1.83 or higher
-- Docker and Docker Compose (optional, for containerized deployment)
+- Rust 1.83 or later
+- Docker & Docker Compose (for easy setup)
+- Or: SurrealDB and RocksDB locally
 
-### Installation
+### Option 1: Docker (Recommended)
 
-1. Clone the repository:
 ```bash
+# Clone the repository
 git clone https://github.com/GraftAI-com/crosspost-rs.git
 cd crosspost-rs
-```
 
-2. Copy the example environment file:
-```bash
+# Copy environment template
 cp .env.example .env
+
+# Edit .env with your OAuth credentials
+# (See "Platform Setup" section below)
+
+# Start all services
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f crosspost-api
 ```
 
-3. Edit `.env` with your OAuth credentials for the platforms you want to support.
+API will be available at `http://localhost:3000`
 
-### Running Locally
-
-Build and run the server:
+### Option 2: Local Development
 
 ```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install SurrealDB
+curl -sSf https://install.surrealdb.com | sh
+
+# Clone and build
+git clone https://github.com/GraftAI-com/crosspost-rs.git
+cd crosspost-rs
 cargo build --release
+
+# Start SurrealDB
+surreal start --log trace --user root --pass root memory
+
+# Set environment variables
+export DATABASE__SURREALDB_URL=ws://localhost:8000
+export DATABASE__ROCKSDB_PATH=./data/rocksdb
+export SERVER__HOST=0.0.0.0
+export SERVER__PORT=3000
+
+# Run the server
 cargo run --bin crosspost-server
 ```
 
-The server will start on `http://localhost:3000` by default.
+---
 
-### Running with Docker
+## 📚 API Documentation
 
-Build and start the services:
-
-```bash
-docker-compose up -d
-```
-
-This will start:
-- The Crosspost API server on port 3000
-- SurrealDB on port 8000
-
-## API Endpoints
-
-### Authentication & OAuth
-
-- `POST /auth/{platform}/connect` - Initiate OAuth flow for a platform
-- `GET /auth/{platform}/callback` - OAuth callback handler
-- `DELETE /auth/accounts/{account_id}` - Disconnect a connected account
-
-### Account Management
-
-- `GET /accounts` - List all connected accounts for the authenticated user
-
-### Posting
-
-- `POST /post` - Create and post content to multiple platforms/accounts
-- `GET /posts` - Get post history for the authenticated user
-- `POST /schedule` - Schedule a post for future publishing
-
-### Health
-
-- `GET /health` - Health check endpoint
-
-## API Usage Examples
-
-### 1. Initiate OAuth Connection
+### Health Check
 
 ```bash
-curl -X POST http://localhost:3000/auth/twitter/connect
+curl http://localhost:3000/health
 ```
-
-Response:
-```json
-{
-  "authorization_url": "https://twitter.com/i/oauth2/authorize?...",
-  "state": "random-state-token"
-}
-```
-
-### 2. List Connected Accounts
-
-```bash
-curl http://localhost:3000/accounts
-```
-
-### 3. Create a Post
-
-```bash
-curl -X POST http://localhost:3000/post \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "Hello from Crosspost Rust!",
-    "account_ids": ["account-uuid-1", "account-uuid-2"]
-  }'
-```
-
-### 4. Schedule a Post
-
-```bash
-curl -X POST http://localhost:3000/schedule \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "Scheduled post content",
-    "account_ids": ["account-uuid-1"],
-    "scheduled_for": "2026-02-15T12:00:00Z"
-  }'
-```
-
-## Configuration
-
-Configuration is managed through environment variables. All variables use the double underscore (`__`) separator for nested configuration.
-
-### Server Configuration
-
-- `SERVER__HOST`: Server host (default: `127.0.0.1`)
-- `SERVER__PORT`: Server port (default: `3000`)
-- `SERVER__BASE_URL`: Base URL for callbacks (e.g., `http://localhost:3000`)
-
-### Database Configuration
-
-- `DATABASE__SURREALDB_URL`: SurrealDB connection URL (default: `memory://`)
-- `DATABASE__ROCKSDB_PATH`: Path to RocksDB data directory (default: `./data/rocksdb`)
-
-### OAuth Configuration
-
-For each platform, configure:
-- `OAUTH__{PLATFORM}__CLIENT_ID`: OAuth client ID
-- `OAUTH__{PLATFORM}__CLIENT_SECRET`: OAuth client secret
-- `OAUTH__{PLATFORM}__REDIRECT_URI`: OAuth redirect URI
-
-Replace `{PLATFORM}` with: `TWITTER`, `FACEBOOK`, `INSTAGRAM`, `LINKEDIN`, `YOUTUBE`, `TIKTOK`, `REDDIT`, `TWITCH`, `SLACK`, or `TELEGRAM`.
-
-## Architecture
-
-### Multi-Tenant Design
-
-Each tenant (marketing agency client) has complete data isolation:
-- Tenant-scoped database queries
-- Separate OAuth tokens per tenant
-- Independent rate limiting per tenant
 
 ### OAuth Flow
 
-1. Client initiates OAuth by calling `/auth/{platform}/connect`
-2. Server returns authorization URL
-3. User authorizes on the platform
-4. Platform redirects to `/auth/{platform}/callback`
-5. Server exchanges code for access token
-6. Token is stored securely in SurrealDB
-7. Automatic refresh before expiry
-
-### Token Management
-
-- Access tokens stored encrypted in SurrealDB
-- Refresh tokens used for automatic renewal
-- Token expiry tracked and monitored
-- Automatic refresh 5 minutes before expiry
-
-### Rate Limiting
-
-- Per-platform rate limits tracked in RocksDB
-- Prevents exceeding platform API limits
-- Configurable limits per platform
-
-## Development
-
-### Building
-
+1. **Initiate Connection**
 ```bash
-cargo build
+curl -X POST http://localhost:3000/auth/twitter/connect \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID"
+
+# Returns:
+{
+  "authorization_url": "https://twitter.com/oauth/authorize?...",
+  "state": "random-csrf-token"
+}
 ```
 
-### Running Tests
+2. **User authorizes on platform** (redirected to authorization_url)
+
+3. **Callback handled automatically** at `/auth/{platform}/callback`
+
+4. **Account is connected** and stored in database
+
+### List Connected Accounts
 
 ```bash
+curl http://localhost:3000/accounts \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID"
+```
+
+### Create Cross-Post
+
+```bash
+curl -X POST http://localhost:3000/post \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Hello from Crosspost-RS! 🚀",
+    "platform_accounts": [
+      "twitter-account-uuid",
+      "facebook-account-uuid"
+    ],
+    "media": []
+  }'
+
+# Returns:
+{
+  "post_id": "uuid",
+  "results": [
+    {
+      "platform": "twitter",
+      "success": true,
+      "platform_post_id": "1234567890",
+      "url": "https://twitter.com/user/status/1234567890"
+    },
+    {
+      "platform": "facebook",
+      "success": true,
+      "platform_post_id": "98765_43210",
+      "url": "https://facebook.com/98765/posts/43210"
+    }
+  ]
+}
+```
+
+### Schedule a Post
+
+```bash
+curl -X POST http://localhost:3000/schedule \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Scheduled post for tomorrow",
+    "platform_accounts": ["twitter-account-uuid"],
+    "scheduled_for": "2026-02-15T09:00:00Z"
+  }'
+```
+
+---
+
+## 🔧 Platform Setup
+
+Each platform requires OAuth2 credentials. Follow these guides:
+
+### Twitter/X
+1. Go to [Twitter Developer Portal](https://developer.twitter.com/en/portal/dashboard)
+2. Create a new app
+3. Enable OAuth 2.0
+4. Set redirect URI: `http://localhost:3000/auth/twitter/callback`
+5. Add to `.env`:
+```env
+TWITTER_CLIENT_ID=your_client_id
+TWITTER_CLIENT_SECRET=your_client_secret
+```
+
+### Facebook
+1. Go to [Facebook Developers](https://developers.facebook.com/)
+2. Create an app
+3. Add "Facebook Login" product
+4. Set Valid OAuth Redirect URIs: `http://localhost:3000/auth/facebook/callback`
+5. Add to `.env`:
+```env
+FACEBOOK_APP_ID=your_app_id
+FACEBOOK_APP_SECRET=your_app_secret
+```
+
+### Instagram
+(Uses Facebook OAuth - requires business account)
+```env
+INSTAGRAM_APP_ID=your_facebook_app_id
+INSTAGRAM_APP_SECRET=your_facebook_app_secret
+```
+
+### LinkedIn
+1. Go to [LinkedIn Developers](https://www.linkedin.com/developers/)
+2. Create an app
+3. Request "Share on LinkedIn" product
+4. Add redirect URL: `http://localhost:3000/auth/linkedin/callback`
+```env
+LINKEDIN_CLIENT_ID=your_client_id
+LINKEDIN_CLIENT_SECRET=your_client_secret
+```
+
+*See [SETUP.md](SETUP.md) for complete platform setup instructions*
+
+---
+
+## 🔐 Multi-Tenant Architecture
+
+### Tenant Isolation
+
+Every request must include:
+- `Authorization: Bearer <jwt_token>` - Contains user ID and tenant ID
+- `X-Tenant-ID: <tenant_id>` - Verified against JWT
+
+### Database Scoping
+
+All queries are automatically scoped by tenant ID:
+```rust
+// Automatic tenant scoping
+let accounts = db.list_connected_accounts_by_user(user_id).await?;
+// Only returns accounts for the user's tenant
+```
+
+### Security Features
+
+- JWT-based authentication
+- Tenant-level data isolation
+- Per-user rate limiting
+- OAuth token encryption at rest
+- Audit logging (planned)
+
+---
+
+## 📊 Supported Platforms
+
+| Platform | OAuth | Post Text | Post Images | Status |
+|----------|-------|-----------|-------------|--------|
+| Twitter  | ✅    | ✅        | 📋         | 🚧 In Progress |
+| Facebook | ✅    | ✅        | 📋         | 🚧 In Progress |
+| Instagram| ✅    | ✅        | 📋         | 🚧 In Progress |
+| LinkedIn | 📋   | 📋        | 📋         | 📋 Planned |
+| YouTube  | 📋   | 📋        | 📋         | 📋 Planned |
+| TikTok   | 📋   | 📋        | 📋         | 📋 Planned |
+| Reddit   | 📋   | 📋        | 📋         | 📋 Planned |
+| Twitch   | 📋   | 📋        | 📋         | 📋 Planned |
+| Slack    | 📋   | 📋        | 📋         | 📋 Planned |
+| Telegram | 📋   | 📋        | 📋         | 📋 Planned |
+
+Legend: ✅ Complete | 🚧 In Progress | 📋 Planned
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
 cargo test
+
+# Run specific crate tests
+cargo test -p crosspost-core
+cargo test -p crosspost-platforms
+
+# Run with output
+cargo test -- --nocapture
+
+# Run integration tests
+cargo test --test '*'
 ```
 
-### Code Formatting
+⚠️ **Note**: Test suite is currently being developed. See [TODO.md](TODO.md) for testing roadmap.
+
+---
+
+## 🚦 Rate Limiting
+
+Each platform has different rate limits. Crosspost-RS automatically manages these:
+
+| Platform | Limit | Window |
+|----------|-------|--------|
+| Twitter  | 300 posts | 3 hours |
+| Facebook | Varies | Per page |
+| Instagram| 25 posts | 24 hours |
+| LinkedIn | 150 posts | 24 hours |
+
+Rate limits are tracked in RocksDB with sliding window algorithm.
+
+---
+
+## 📈 Monitoring
+
+### Health Endpoints
 
 ```bash
-cargo fmt
+# Basic health check
+curl http://localhost:3000/health
+
+# Database health (planned)
+curl http://localhost:3000/health/db
+
+# Metrics (planned, Prometheus format)
+curl http://localhost:3000/metrics
 ```
 
-### Linting
+### Logging
+
+Structured logging with tracing:
 
 ```bash
-cargo clippy
+# Set log level
+export RUST_LOG=debug
+
+# Or per-module
+export RUST_LOG=crosspost_api=debug,crosspost_platforms=trace
 ```
 
-## Deployment
+---
 
-### Docker Deployment
+## 🤝 Contributing
 
-The project includes a multi-stage Dockerfile for optimized production builds:
+We welcome contributions! This is a large project with many opportunities to help.
 
-```bash
-docker build -t crosspost-rs .
-docker run -p 3000:3000 --env-file .env crosspost-rs
-```
+### How to Contribute
 
-### Using Docker Compose
+1. Check [TODO.md](TODO.md) for available tasks
+2. Pick a task and comment on the issue
+3. Fork the repository
+4. Create a feature branch: `git checkout -b feature/platform-reddit`
+5. Make your changes (write tests first!)
+6. Run tests: `cargo test`
+7. Run linter: `cargo clippy -- -D warnings`
+8. Format code: `cargo fmt`
+9. Commit with clear messages
+10. Push and create a Pull Request
 
-For a complete setup with SurrealDB:
+### Development Guidelines
 
-```bash
-docker-compose up -d
-```
+- **Write tests first** (TDD approach)
+- Follow Rust idioms and best practices
+- Keep functions small and focused
+- Document public APIs with rustdoc
+- Add error context with meaningful messages
+- Update TODO.md with your progress
 
-## Security Considerations
+### Good First Issues
 
-- All OAuth tokens are stored securely in SurrealDB
-- Environment variables used for sensitive configuration
-- HTTPS recommended for production deployments
-- Tenant isolation enforced at the middleware layer
-- Input validation on all endpoints
+- Implement a platform client (e.g., Reddit, Twitch)
+- Add unit tests for existing code
+- Improve error messages
+- Write API documentation
+- Add examples
 
-## Roadmap
+---
 
-- [ ] Complete implementation of all 10 platforms
-- [ ] Add comprehensive test coverage
-- [ ] Implement JWT-based authentication for API users
-- [ ] Add webhook support for platform events
-- [ ] Implement analytics and reporting
-- [ ] Add media upload support for all platforms
-- [ ] Implement scheduled post processing worker
-- [ ] Add GraphQL API option
-- [ ] Implement API rate limiting
-- [ ] Add observability (metrics, distributed tracing)
+## 📄 License
 
-## License
+Copyright 2024-2026 Crosspost Contributors
 
-Apache License 2.0 - See LICENSE file for details
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-## Contributing
+    http://www.apache.org/licenses/LICENSE-2.0
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 
-## Support
+---
 
-For issues, questions, or contributions, please open an issue on GitHub.
+## 🙏 Acknowledgments
+
+- Original [crosspost library](https://github.com/humanwhocodes/crosspost) by [Nicholas C. Zakas](https://humanwhocodes.com)
+- Inspired by the need for enterprise-grade social media management tools
+- Built with amazing Rust ecosystem crates: Axum, SurrealDB, Tokio, and many more
+
+---
+
+## 📞 Support
+
+- 📖 [Documentation](https://github.com/GraftAI-com/crosspost-rs/wiki) (coming soon)
+- 🐛 [Issue Tracker](https://github.com/GraftAI-com/crosspost-rs/issues)
+- 💬 [Discussions](https://github.com/GraftAI-com/crosspost-rs/discussions)
+- 📊 [Project Board](https://github.com/GraftAI-com/crosspost-rs/projects)
+
+---
+
+**⚡ Built with Rust. Designed for scale. Ready for your marketing agency.**
+
+*Star this repo if you find it useful!* ⭐

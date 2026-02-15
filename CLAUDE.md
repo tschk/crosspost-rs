@@ -10,28 +10,45 @@ Crosspost-RS is a Rust library for cross-posting content to 16 social media plat
 ## Build & Run
 
 ```bash
-cargo check                       # Check compilation
-cargo build --release             # Build release
-cargo test --workspace            # Run all tests (86 currently)
-cargo clippy --workspace -- -D warnings  # Lint (must pass with zero warnings)
-cargo fmt --all -- --check        # Format check
+cargo check                                          # Check library compilation
+cargo build --release                                # Build library release
+cargo build --features server                        # Build with server
+cargo test                                           # Run library tests (38 tests)
+cargo test --features server                         # Run all tests (61 tests)
+cargo clippy --all-targets -- -D warnings            # Lint library
+cargo clippy --all-targets --features server -- -D warnings  # Lint everything
+cargo fmt --all -- --check                           # Format check
 ```
 
-## Workspace Structure
+## Crate Structure
+
+This is a **single crate** with an optional `server` feature flag:
 
 ```
-crates/
-├── crosspost/  # Main library crate - Strategy pattern, Client, 16 platforms
-├── core/       # Shared types, errors, config (used by server crates)
-├── auth/       # JWT, OAuth2, password hashing (server)
-├── db/         # SurrealDB client + cache (server)
-├── platforms/  # Platform trait + clients (server, older pattern)
-└── api/        # Axum HTTP server, routes, handlers (server)
+src/
+├── lib.rs          # Library root (re-exports all public types)
+├── client.rs       # Client orchestrator (post to all/selective strategies)
+├── error.rs        # Library Error and Result types
+├── strategy.rs     # Strategy trait + PostResponse
+├── types.rs        # Credential structs, ImageEmbed, PostOptions, PostResult
+├── env.rs          # Environment variable helpers
+├── util/
+│   └── images.rs   # Image processing (MIME, dimensions, compression)
+├── strategies/     # 16 platform strategy implementations
+│   ├── mod.rs
+│   ├── twitter.rs, bluesky.rs, mastodon.rs, linkedin.rs, ...
+│   └── (one file per platform)
+├── server/         # Optional SaaS server layer (behind "server" feature)
+│   ├── mod.rs
+│   ├── core/       # Shared server types, errors, config
+│   ├── auth/       # JWT, OAuth2, password hashing
+│   ├── db/         # SurrealDB client + cache
+│   └── api/        # Axum HTTP server, routes, handlers, rate limiting
+└── bin/
+    └── server.rs   # Server binary entrypoint (requires "server" feature)
 ```
 
-The `crosspost` crate is the standalone library. The other crates are for an optional SaaS server layer.
-
-## Key Dependencies (crosspost crate)
+## Key Dependencies (library)
 
 | Crate | Purpose |
 |-------|---------|
@@ -73,14 +90,14 @@ The `crosspost` crate is the standalone library. The other crates are for an opt
 ## Code Conventions
 
 ### Rust Style
-- Edition 2021, resolver v2
+- Edition 2021
 - `cargo fmt` and `cargo clippy -- -D warnings` must pass
 - Use `thiserror` for error types
-- The `crosspost` crate has its own `Error` and `Result` types (standalone, not dependent on `crosspost_core`)
-- Server crates use `crosspost_core::Error` and `crosspost_core::Result`
+- Library uses `crate::Error` and `crate::Result` (standalone)
+- Server code uses `crate::server::core::Error` and `crate::server::core::Result`
 - Async everywhere with `#[async_trait::async_trait]` for trait impls
 - Strategies use `reqwest::Client` stored as a field
-- Use `serde` derives on types that cross crate boundaries
+- Use `serde` derives on types that cross boundaries
 - Never use `.unwrap()` in production code
 
 ### Error Handling
@@ -88,7 +105,7 @@ The `crosspost` crate is the standalone library. The other crates are for an opt
 - Map external errors with `.map_err(|e| Error::Platform(format!(...)))`
 - Use `?` with `.map_err()` for conversions
 
-### Strategy Pattern (crosspost crate)
+### Strategy Pattern
 Every strategy follows this structure:
 
 ```rust
@@ -121,11 +138,8 @@ impl Strategy for XxxStrategy {
 }
 ```
 
-### Platform Client Pattern (server crates, older)
-Server crates use the `Platform` trait in `crosspost-platforms` with `access_token: &str` parameter and pipe-delimited multi-value tokens.
-
 ### Image Support
-Images are passed via `PostOptions.images: Option<Vec<ImageEmbed>>`:
+Images are passed via `PostOptions.images: Vec<ImageEmbed>`:
 ```rust
 pub struct ImageEmbed {
     pub data: Vec<u8>,
@@ -134,7 +148,7 @@ pub struct ImageEmbed {
 }
 ```
 
-Utility functions in `crates/crosspost/src/util/images.rs`:
+Utility functions in `src/util/images.rs`:
 - `detect_mime_type(data)` - MIME detection via `infer`
 - `image_dimensions(data)` - Width/height via `image`
 - `validate_images(images)` - Type and count validation (max 4)
@@ -147,7 +161,7 @@ Each platform has a typed credential struct:
 - `BlueskyCredentials { identifier, password, host: Option<String> }`
 - `MastodonCredentials { access_token, host }`
 - `LinkedInCredentials { access_token }`
-- `FacebookCredentials { access_token, page_id: Option<String> }`
+- `FacebookCredentials { access_token }`
 - `InstagramCredentials { access_token }`
 - `DiscordCredentials { bot_token, channel_id }`
 - `DiscordWebhookCredentials { webhook_url }`
@@ -160,7 +174,7 @@ Each platform has a typed credential struct:
 - `RedditCredentials { access_token, subreddit: Option<String> }`
 - `TwitchCredentials { access_token, client_id }`
 
-### API Handler Pattern (server crates)
+### Server Handler Pattern (behind `server` feature)
 Protected handlers use Axum extractors with Claims from JWT middleware:
 ```rust
 pub async fn handler(
@@ -170,31 +184,33 @@ pub async fn handler(
 ) -> Result<Json<ResponseType>, AppError> { ... }
 ```
 
-### SurrealDB Patterns (server crates)
+Server handlers use `create_strategy_for_account()` to map `ConnectedAccount` (with pipe-delimited tokens) to typed Strategy instances.
+
+### SurrealDB Patterns (server)
 - Use `("table", id.to_string())` tuples for record IDs
 - `.content(owned_value)` not `.content(&borrowed)` (SurrealDB requires `'static`)
 - `.create()` returns `Option<T>`, not `Vec<T>`
 
 ## Architecture Decisions
 
+- **Single crate** - library at root, server behind `server` feature flag
 - **Strategy pattern** - credentials baked into struct at construction time (not passed per-call)
 - **Concurrent posting** via `futures::future::join_all` with per-strategy error isolation
-- **Standalone library** - `crosspost` crate has no dependency on server crates
 - **Raw reqwest** for all platform APIs (no SDK crates) for consistency and control
 - **Manual Nostr crypto** using secp256k1/sha2/bech32 (avoids heavy nostr-sdk dependency)
 - **Message length validation** before platform dispatch (prevents wasted API calls)
-- **Typed credentials** instead of pipe-delimited strings
+- **Typed credentials** instead of pipe-delimited strings (library); server maps pipe-delimited DB tokens to typed credentials
 
 ## What NOT to Do
 
 - Don't add dependencies without checking if an existing one covers the need
-- Don't create new error types in the `crosspost` crate - extend `crosspost::Error` if needed
+- Don't create new error types - extend `crosspost::Error` if needed
 - Don't use `println!` - use `tracing::info!`, `tracing::error!`, etc.
 - Don't use `.unwrap()` in production code
 - When adding a new strategy, also:
-  - Add credential struct to `crates/crosspost/src/types.rs`
-  - Add module + re-export in `crates/crosspost/src/strategies/mod.rs`
-  - Add re-export in `crates/crosspost/src/lib.rs`
+  - Add credential struct to `src/types.rs`
+  - Add module + re-export in `src/strategies/mod.rs`
+  - Add re-export in `src/lib.rs`
   - Add tests for constructor validation, metadata, and message length
 
 ## Testing Guidelines

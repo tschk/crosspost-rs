@@ -145,11 +145,11 @@ Attach images using `PostOptions`:
 use crosspost::{PostOptions, ImageEmbed};
 
 let options = PostOptions {
-    images: Some(vec![ImageEmbed {
+    images: vec![ImageEmbed {
         data: std::fs::read("photo.jpg")?,
         alt: Some("A photo".into()),
         mime_type: Some("image/jpeg".into()),
-    }]),
+    }],
 };
 
 let results = client.post("Check out this photo!", Some(&options)).await;
@@ -175,30 +175,40 @@ Client::post("message")
 
 One strategy failing does not affect others. Results are collected as `Vec<PostResult>`.
 
+### Server Feature
+
+An optional SaaS server layer is available behind the `server` feature flag:
+
+```toml
+[dependencies]
+crosspost = { git = "https://github.com/GraftAI-com/crosspost-rs.git", features = ["server"] }
+```
+
+This includes:
+- Axum HTTP API with JWT authentication
+- SurrealDB for data persistence
+- OAuth2 flow handling for platform connections
+- Rate limiting (global and per-user)
+- Background scheduling for deferred posts
+- Token refresh management
+
+Run the server:
+```bash
+cargo run --features server --bin crosspost-server
+```
+
 ---
 
 ## Development
 
 ```bash
-cargo check                                    # Check compilation
-cargo test --workspace                         # Run all 86 tests
-cargo clippy --workspace -- -D warnings        # Lint
-cargo fmt --all -- --check                     # Format check
+cargo check                                          # Check library
+cargo test                                           # Library tests (38)
+cargo test --features server                         # All tests (61)
+cargo clippy --all-targets -- -D warnings            # Lint library
+cargo clippy --all-targets --features server -- -D warnings  # Lint everything
+cargo fmt --all -- --check                           # Format check
 ```
-
-### Workspace Structure
-
-```
-crates/
-├── crosspost/     # Main library crate (Strategy pattern, Client, 16 platforms)
-├── core/          # Shared types, errors, config (used by server crates)
-├── auth/          # JWT, OAuth2, password hashing (server)
-├── db/            # SurrealDB client + cache (server)
-├── platforms/     # Platform trait (server, older pattern)
-└── api/           # Axum HTTP server (server)
-```
-
-The `crosspost` crate is the standalone library. The other crates (`core`, `auth`, `db`, `platforms`, `api`) are for an optional SaaS server layer.
 
 ---
 

@@ -1,19 +1,22 @@
 use crate::{
-    rate_limit::{create_rate_limiter, create_rate_limiter_per_minute, RateLimitLayer},
+    rate_limit::{
+        create_keyed_rate_limiter, create_keyed_rate_limiter_per_minute,
+        create_rate_limiter_per_minute, KeyedRateLimitLayer, RateLimitLayer,
+    },
     state::AppState,
 };
 use axum::{
     middleware as axum_middleware,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use std::sync::Arc;
 
 pub fn create_router(state: Arc<AppState>) -> Router {
     // Rate limiters for different endpoint groups
-    let auth_limiter = create_rate_limiter_per_minute(20); // 20 auth attempts/min
-    let post_limiter = create_rate_limiter(5); // 5 posts/sec
-    let read_limiter = create_rate_limiter(30); // 30 reads/sec
+    let auth_limiter = create_rate_limiter_per_minute(20); // 20 auth attempts/min (global)
+    let post_limiter = create_keyed_rate_limiter(5); // 5 posts/sec per user
+    let read_limiter = create_keyed_rate_limiter_per_minute(120); // 120 reads/min per user
 
     // Public routes (no auth required)
     let public_routes = Router::new()
@@ -42,13 +45,26 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/accounts", get(crate::handlers::accounts::list_accounts))
         // Read endpoints
         .route("/posts", get(crate::handlers::posts::list_posts))
-        .layer(RateLimitLayer::new(read_limiter));
+        .route(
+            "/schedule",
+            get(crate::handlers::posts::list_scheduled_posts),
+        )
+        .layer(KeyedRateLimitLayer::new(read_limiter));
 
-    // Write-heavy protected routes (stricter rate limit)
+    // Write-heavy protected routes (stricter rate limit, per-user)
     let write_routes = Router::new()
         .route("/post", post(crate::handlers::posts::create_post))
         .route("/schedule", post(crate::handlers::posts::schedule_post))
-        .layer(RateLimitLayer::new(post_limiter));
+        .route(
+            "/schedule/:post_id",
+            put(crate::handlers::posts::update_scheduled_post)
+                .delete(crate::handlers::posts::cancel_scheduled_post),
+        )
+        .route(
+            "/auth/connect-direct",
+            post(crate::handlers::auth::connect_direct),
+        )
+        .layer(KeyedRateLimitLayer::new(post_limiter));
 
     // Combine protected routes with auth middleware
     let authenticated = Router::new()

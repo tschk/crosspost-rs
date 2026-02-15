@@ -3,7 +3,7 @@ use crosspost_core::{Error, Result};
 use serde::Deserialize;
 
 /// Telegram uses the Bot API instead of OAuth2.
-/// The `access_token` here is the bot token from @BotFather.
+/// The `access_token` format is "bot_token|chat_id".
 pub struct TelegramClient {
     client: reqwest::Client,
 }
@@ -47,35 +47,68 @@ struct TelegramGetMeResponse {
     ok: bool,
 }
 
+impl TelegramClient {
+    /// Parse access_token as "bot_token|chat_id" (consistent delimiter)
+    fn parse_token(access_token: &str) -> Result<(&str, &str)> {
+        if let Some(idx) = access_token.rfind('|') {
+            let bot_token = &access_token[..idx];
+            let chat_id = &access_token[idx + 1..];
+            if chat_id.parse::<i64>().is_ok() || chat_id.starts_with('@') {
+                return Ok((bot_token, chat_id));
+            }
+        }
+        Err(Error::Platform(
+            "Telegram requires token as 'bot_token|chat_id'".to_string(),
+        ))
+    }
+}
+
 #[async_trait::async_trait]
 impl Platform for TelegramClient {
     async fn post(&self, access_token: &str, request: PostRequest) -> Result<PostResponse> {
-        // For Telegram, the "access_token" is the bot token.
-        // The chat_id should be configured per connected account.
-        // For channel posting, use @channel_username as chat_id.
-        // This is a simplified implementation that expects chat_id in the content
-        // format: "chat_id:message" or just posts to a default configured channel.
+        let (bot_token, chat_id) = Self::parse_token(access_token)?;
 
-        // For now, we expect the platform_account_id (stored in ConnectedAccount)
-        // to be the chat_id. The access_token is the bot token.
-        // Since we don't have the chat_id here, we use a convention:
-        // The bot token format is "bot_token:chat_id"
-        let (bot_token, chat_id) = if let Some(idx) = access_token.rfind(':') {
-            // Check if this looks like it has a chat_id appended
-            let potential_chat_id = &access_token[idx + 1..];
-            if potential_chat_id.parse::<i64>().is_ok() || potential_chat_id.starts_with('@') {
-                (&access_token[..idx], potential_chat_id.to_string())
-            } else {
-                // Standard bot token format (number:hash), no chat_id
-                return Err(Error::Platform(
-                    "Telegram requires a chat_id. Store as 'bot_token|chat_id' in access_token"
-                        .to_string(),
-                ));
+        // Handle image uploads via sendPhoto
+        if let Some(ref images) = request.images {
+            if let Some(first_image) = images.first() {
+                let mime = first_image
+                    .mime_type
+                    .clone()
+                    .unwrap_or_else(|| "image/jpeg".to_string());
+                let ext = match mime.as_str() {
+                    "image/png" => "png",
+                    "image/jpeg" => "jpg",
+                    "image/gif" => "gif",
+                    _ => "jpg",
+                };
+
+                let photo_part = reqwest::multipart::Part::bytes(first_image.data.clone())
+                    .mime_str(&mime)
+                    .map_err(|e| Error::Platform(format!("Invalid MIME type: {}", e)))?
+                    .file_name(format!("photo.{}", ext));
+
+                let mut form = reqwest::multipart::Form::new()
+                    .text("chat_id", chat_id.to_string())
+                    .part("photo", photo_part);
+
+                if !request.content.is_empty() {
+                    form = form.text("caption", request.content.clone());
+                }
+
+                let url = format!("https://api.telegram.org/bot{}/sendPhoto", bot_token);
+                let response = self
+                    .client
+                    .post(&url)
+                    .multipart(form)
+                    .send()
+                    .await
+                    .map_err(|e| Error::Platform(format!("Telegram API error: {}", e)))?;
+
+                return self.handle_response(response).await;
             }
-        } else {
-            return Err(Error::Platform("Invalid Telegram token format".to_string()));
-        };
+        }
 
+        // Text-only message
         let url = format!("https://api.telegram.org/bot{}/sendMessage", bot_token);
 
         let body = serde_json::json!({
@@ -92,6 +125,44 @@ impl Platform for TelegramClient {
             .await
             .map_err(|e| Error::Platform(format!("Telegram API error: {}", e)))?;
 
+        self.handle_response(response).await
+    }
+
+    async fn validate_token(&self, access_token: &str) -> Result<bool> {
+        let (bot_token, _) = Self::parse_token(access_token)?;
+
+        let url = format!("https://api.telegram.org/bot{}/getMe", bot_token);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| Error::Platform(format!("Telegram API error: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Ok(false);
+        }
+
+        let result: TelegramGetMeResponse = response
+            .json()
+            .await
+            .map_err(|e| Error::Platform(format!("Failed to parse Telegram response: {}", e)))?;
+
+        Ok(result.ok)
+    }
+
+    fn platform_name(&self) -> &'static str {
+        "telegram"
+    }
+
+    fn max_message_length(&self) -> usize {
+        4096
+    }
+}
+
+impl TelegramClient {
+    async fn handle_response(&self, response: reqwest::Response) -> Result<PostResponse> {
         if !response.status().is_success() {
             let error_text = response
                 .text()
@@ -131,37 +202,28 @@ impl Platform for TelegramClient {
             url,
         })
     }
+}
 
-    async fn validate_token(&self, access_token: &str) -> Result<bool> {
-        // Extract bot token (before the chat_id separator if present)
-        let bot_token = if let Some(idx) = access_token.rfind('|') {
-            &access_token[..idx]
-        } else {
-            access_token
-        };
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        let url = format!("https://api.telegram.org/bot{}/getMe", bot_token);
+    #[test]
+    fn test_parse_token() {
+        let (bot, chat) = TelegramClient::parse_token("123456:ABC-DEF|@mychannel").unwrap();
+        assert_eq!(bot, "123456:ABC-DEF");
+        assert_eq!(chat, "@mychannel");
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| Error::Platform(format!("Telegram API error: {}", e)))?;
+        let (bot, chat) = TelegramClient::parse_token("123456:ABC-DEF|-100123456789").unwrap();
+        assert_eq!(bot, "123456:ABC-DEF");
+        assert_eq!(chat, "-100123456789");
 
-        if !response.status().is_success() {
-            return Ok(false);
-        }
-
-        let result: TelegramGetMeResponse = response
-            .json()
-            .await
-            .map_err(|e| Error::Platform(format!("Failed to parse Telegram response: {}", e)))?;
-
-        Ok(result.ok)
+        assert!(TelegramClient::parse_token("invalid").is_err());
     }
 
-    fn platform_name(&self) -> &'static str {
-        "telegram"
+    #[test]
+    fn test_max_message_length() {
+        let client = TelegramClient::new();
+        assert_eq!(client.max_message_length(), 4096);
     }
 }

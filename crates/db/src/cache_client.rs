@@ -6,6 +6,8 @@ use surrealdb::Surreal;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CacheEntry {
     value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 pub struct CacheClient {
@@ -21,6 +23,7 @@ impl CacheClient {
     pub async fn store(&self, key: &str, value: &str) -> Result<()> {
         let entry = CacheEntry {
             value: value.to_string(),
+            expires_at: None,
         };
         let _: Option<CacheEntry> = self
             .db
@@ -31,14 +34,41 @@ impl CacheClient {
         Ok(())
     }
 
-    /// Retrieve a value from the cache
+    /// Store a value in the cache with a TTL in seconds
+    pub async fn store_with_ttl(&self, key: &str, value: &str, ttl_secs: i64) -> Result<()> {
+        let entry = CacheEntry {
+            value: value.to_string(),
+            expires_at: Some(chrono::Utc::now() + chrono::Duration::seconds(ttl_secs)),
+        };
+        let _: Option<CacheEntry> = self
+            .db
+            .upsert(("cache", key))
+            .content(entry)
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Retrieve a value from the cache, filtering out expired entries
     pub async fn get(&self, key: &str) -> Result<Option<String>> {
         let result: Option<CacheEntry> = self
             .db
             .select(("cache", key))
             .await
             .map_err(|e| Error::Database(e.to_string()))?;
-        Ok(result.map(|e| e.value))
+        match result {
+            Some(entry) => {
+                if let Some(expires_at) = entry.expires_at {
+                    if chrono::Utc::now() > expires_at {
+                        // Expired - clean up and return None
+                        self.delete(key).await.ok();
+                        return Ok(None);
+                    }
+                }
+                Ok(Some(entry.value))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Delete a value from the cache

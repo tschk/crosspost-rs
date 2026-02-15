@@ -25,6 +25,9 @@ pub struct ServerConfig {
     pub host: String,
     pub port: u16,
     pub base_url: String,
+    /// Allowed CORS origins. If empty or missing, no wildcard is used (restrictive).
+    #[serde(default)]
+    pub cors_origins: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -45,6 +48,12 @@ pub struct OAuthConfig {
     pub twitch: Option<PlatformOAuthConfig>,
     pub slack: Option<PlatformOAuthConfig>,
     pub telegram: Option<PlatformOAuthConfig>,
+    pub bluesky: Option<PlatformOAuthConfig>,
+    pub mastodon: Option<PlatformOAuthConfig>,
+    pub discord: Option<PlatformOAuthConfig>,
+    pub discord_webhook: Option<PlatformOAuthConfig>,
+    pub devto: Option<PlatformOAuthConfig>,
+    pub nostr: Option<PlatformOAuthConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

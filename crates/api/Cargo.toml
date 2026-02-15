@@ -33,3 +33,5 @@ governor = { workspace = true }
 validator = { workspace = true }
 oauth2 = { workspace = true }
 jsonwebtoken = { workspace = true }
+base64 = { workspace = true }
+reqwest = { workspace = true }

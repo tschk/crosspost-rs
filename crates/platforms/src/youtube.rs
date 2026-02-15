@@ -104,7 +104,10 @@ impl Platform for YouTubeClient {
             .await
             .map_err(|e| Error::Platform(format!("Failed to parse YouTube response: {}", e)))?;
 
-        let post_id = result["id"].as_str().unwrap_or("unknown").to_string();
+        let post_id = result["id"]
+            .as_str()
+            .ok_or_else(|| Error::Platform("YouTube API did not return a post ID".to_string()))?
+            .to_string();
 
         Ok(PostResponse {
             platform_post_id: post_id.clone(),
@@ -130,5 +133,9 @@ impl Platform for YouTubeClient {
 
     fn platform_name(&self) -> &'static str {
         "youtube"
+    }
+
+    fn max_message_length(&self) -> usize {
+        5000
     }
 }

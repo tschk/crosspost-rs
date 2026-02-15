@@ -2,18 +2,17 @@ use crosspost_core::{Error, Platform, Result};
 use crosspost_db::SurrealDbClient;
 use oauth2::{
     basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
-    ClientSecret, CsrfToken, RedirectUrl, Scope, TokenUrl,
+    ClientSecret, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope, TokenUrl,
 };
 use std::sync::Arc;
 
 pub struct OAuthHandler {
-    #[allow(dead_code)]
-    db: Arc<SurrealDbClient>,
+    _db: Arc<SurrealDbClient>,
 }
 
 impl OAuthHandler {
     pub fn new(db: Arc<SurrealDbClient>) -> Self {
-        Self { db }
+        Self { _db: db }
     }
 
     /// Create OAuth client for a platform
@@ -39,12 +38,17 @@ impl OAuthHandler {
         Ok(client)
     }
 
-    /// Get authorization URL for OAuth flow
+    /// Check if a platform requires PKCE
+    fn requires_pkce(platform: Platform) -> bool {
+        matches!(platform, Platform::Twitter)
+    }
+
+    /// Get authorization URL for OAuth flow (with optional PKCE)
     pub fn get_authorization_url(
         &self,
         client: &BasicClient,
         platform: Platform,
-    ) -> Result<(String, String)> {
+    ) -> Result<(String, String, Option<PkceCodeVerifier>)> {
         let scopes = self.get_platform_scopes(platform);
 
         let mut auth_request = client.authorize_url(CsrfToken::new_random);
@@ -53,21 +57,37 @@ impl OAuthHandler {
             auth_request = auth_request.add_scope(Scope::new(scope.to_string()));
         }
 
-        let (auth_url, csrf_token) = auth_request.url();
-
-        Ok((auth_url.to_string(), csrf_token.secret().clone()))
+        if Self::requires_pkce(platform) {
+            let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+            auth_request = auth_request.set_pkce_challenge(pkce_challenge);
+            let (auth_url, csrf_token) = auth_request.url();
+            Ok((
+                auth_url.to_string(),
+                csrf_token.secret().clone(),
+                Some(pkce_verifier),
+            ))
+        } else {
+            let (auth_url, csrf_token) = auth_request.url();
+            Ok((auth_url.to_string(), csrf_token.secret().clone(), None))
+        }
     }
 
-    /// Exchange authorization code for access token
+    /// Exchange authorization code for access token (with optional PKCE verifier)
     pub async fn exchange_code(
         &self,
         client: &BasicClient,
         code: String,
+        pkce_verifier: Option<PkceCodeVerifier>,
     ) -> Result<
         oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
     > {
-        let token = client
-            .exchange_code(AuthorizationCode::new(code))
+        let mut exchange = client.exchange_code(AuthorizationCode::new(code));
+
+        if let Some(verifier) = pkce_verifier {
+            exchange = exchange.set_pkce_verifier(verifier);
+        }
+
+        let token = exchange
             .request_async(async_http_client)
             .await
             .map_err(|e| Error::OAuth(e.to_string()))?;
@@ -119,6 +139,29 @@ impl OAuthHandler {
                     "Telegram uses Bot API, not OAuth2".to_string(),
                 ))
             }
+            Platform::Bluesky => {
+                return Err(Error::OAuth(
+                    "Bluesky uses app password authentication, not OAuth2".to_string(),
+                ))
+            }
+            Platform::Mastodon => (
+                "https://mastodon.social/oauth/authorize",
+                "https://mastodon.social/oauth/token",
+            ),
+            Platform::Discord | Platform::DiscordWebhook => (
+                "https://discord.com/api/oauth2/authorize",
+                "https://discord.com/api/oauth2/token",
+            ),
+            Platform::Devto => {
+                return Err(Error::OAuth(
+                    "Dev.to uses API key authentication, not OAuth2".to_string(),
+                ))
+            }
+            Platform::Nostr => {
+                return Err(Error::OAuth(
+                    "Nostr uses private key authentication, not OAuth2".to_string(),
+                ))
+            }
         };
 
         Ok((auth_url.to_string(), token_url.to_string()))
@@ -140,6 +183,13 @@ impl OAuthHandler {
             Platform::Twitch => vec!["channel:manage:broadcast", "user:read:email"],
             Platform::Slack => vec!["chat:write", "files:write"],
             Platform::Telegram => vec![],
+            Platform::Bluesky => vec![],
+            Platform::Mastodon => vec!["read", "write"],
+            Platform::Discord | Platform::DiscordWebhook => {
+                vec!["bot", "applications.commands"]
+            }
+            Platform::Devto => vec![],
+            Platform::Nostr => vec![],
         }
     }
 }

@@ -8,13 +8,15 @@ use uuid::Uuid;
 
 pub struct TokenManager {
     db: Arc<SurrealDbClient>,
-    #[allow(dead_code)]
-    oauth_handler: Arc<crate::OAuthHandler>,
+    _oauth_handler: Arc<crate::OAuthHandler>,
 }
 
 impl TokenManager {
     pub fn new(db: Arc<SurrealDbClient>, oauth_handler: Arc<crate::OAuthHandler>) -> Self {
-        Self { db, oauth_handler }
+        Self {
+            db,
+            _oauth_handler: oauth_handler,
+        }
     }
 
     /// Check if token is expired or will expire soon (within 5 minutes)

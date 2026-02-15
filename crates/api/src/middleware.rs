@@ -50,8 +50,16 @@ impl IntoResponse for AppError {
         let status_code =
             StatusCode::from_u16(self.0.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
+        // For 5xx errors, log the full error but return a generic message to the client
+        let message = if status_code.is_server_error() {
+            tracing::error!(error = %self.0, "Internal server error");
+            "Internal server error".to_string()
+        } else {
+            self.0.to_string()
+        };
+
         let body = serde_json::json!({
-            "error": self.0.to_string(),
+            "error": message,
         });
 
         (status_code, axum::Json(body)).into_response()

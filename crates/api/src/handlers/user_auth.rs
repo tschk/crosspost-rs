@@ -1,5 +1,5 @@
 use crate::{middleware::AppError, state::AppState};
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use crosspost_auth::{hash_password, verify_password};
 use crosspost_core::{AuthTokenResponse, Error, LoginRequest, RegisterRequest, User};
 use std::sync::Arc;
@@ -47,11 +47,14 @@ pub async fn register(
         .jwt
         .generate_token(user.id, user.tenant_id, &user.email)?;
 
-    Ok(Json(AuthTokenResponse {
-        token,
-        user_id: user.id,
-        tenant_id: user.tenant_id,
-    }))
+    Ok((
+        StatusCode::CREATED,
+        Json(AuthTokenResponse {
+            token,
+            user_id: user.id,
+            tenant_id: user.tenant_id,
+        }),
+    ))
 }
 
 /// Log in an existing user

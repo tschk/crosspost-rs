@@ -65,6 +65,12 @@ pub enum Platform {
     Twitch,
     Slack,
     Telegram,
+    Bluesky,
+    Mastodon,
+    Discord,
+    DiscordWebhook,
+    Devto,
+    Nostr,
 }
 
 impl Platform {
@@ -80,6 +86,12 @@ impl Platform {
             Platform::Twitch => "twitch",
             Platform::Slack => "slack",
             Platform::Telegram => "telegram",
+            Platform::Bluesky => "bluesky",
+            Platform::Mastodon => "mastodon",
+            Platform::Discord => "discord",
+            Platform::DiscordWebhook => "discord_webhook",
+            Platform::Devto => "devto",
+            Platform::Nostr => "nostr",
         }
     }
 }
@@ -105,6 +117,12 @@ impl std::str::FromStr for Platform {
             "twitch" => Ok(Platform::Twitch),
             "slack" => Ok(Platform::Slack),
             "telegram" => Ok(Platform::Telegram),
+            "bluesky" => Ok(Platform::Bluesky),
+            "mastodon" => Ok(Platform::Mastodon),
+            "discord" => Ok(Platform::Discord),
+            "discord_webhook" | "discordwebhook" => Ok(Platform::DiscordWebhook),
+            "devto" | "dev.to" => Ok(Platform::Devto),
+            "nostr" => Ok(Platform::Nostr),
             _ => Err(format!("Unknown platform: {}", s)),
         }
     }
@@ -176,6 +194,17 @@ pub struct ScheduledPost {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Image data for post attachments
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageData {
+    /// URL to fetch the image from, or base64-encoded data
+    pub url: Option<String>,
+    /// Base64-encoded image data
+    pub data: Option<String>,
+    /// Alt text for accessibility
+    pub alt: Option<String>,
+}
+
 /// Request to create a post
 #[derive(Debug, Clone, Serialize, Deserialize, Validate)]
 pub struct CreatePostRequest {
@@ -184,6 +213,7 @@ pub struct CreatePostRequest {
     #[validate(length(min = 1))]
     pub account_ids: Vec<Uuid>,
     pub media_urls: Option<Vec<String>>,
+    pub images: Option<Vec<ImageData>>,
 }
 
 /// Response for a created post
@@ -197,7 +227,7 @@ pub struct CreatePostResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformPostResult {
     pub account_id: Uuid,
-    pub platform: Platform,
+    pub platform: Option<Platform>,
     pub status: PostStatus,
     pub platform_post_id: Option<String>,
     pub error_message: Option<String>,
@@ -212,6 +242,32 @@ pub struct SchedulePostRequest {
     pub account_ids: Vec<Uuid>,
     pub scheduled_for: DateTime<Utc>,
     pub media_urls: Option<Vec<String>>,
+}
+
+/// Request to update a scheduled post
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct UpdateScheduledPostRequest {
+    #[validate(length(min = 1, max = 10000))]
+    pub content: Option<String>,
+    pub scheduled_for: Option<DateTime<Utc>>,
+    pub account_ids: Option<Vec<Uuid>>,
+}
+
+/// Request to directly connect a non-OAuth platform account
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct DirectConnectRequest {
+    #[validate(length(min = 1))]
+    pub platform: String,
+    #[validate(length(min = 1))]
+    pub access_token: String,
+    pub account_name: Option<String>,
+}
+
+/// Pagination query parameters
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaginationQuery {
+    pub offset: Option<usize>,
+    pub limit: Option<usize>,
 }
 
 /// OAuth authorization URL response
@@ -245,6 +301,20 @@ mod tests {
         assert_eq!(Platform::from_str("twitch").unwrap(), Platform::Twitch);
         assert_eq!(Platform::from_str("slack").unwrap(), Platform::Slack);
         assert_eq!(Platform::from_str("telegram").unwrap(), Platform::Telegram);
+        assert_eq!(Platform::from_str("bluesky").unwrap(), Platform::Bluesky);
+        assert_eq!(Platform::from_str("mastodon").unwrap(), Platform::Mastodon);
+        assert_eq!(Platform::from_str("discord").unwrap(), Platform::Discord);
+        assert_eq!(
+            Platform::from_str("discord_webhook").unwrap(),
+            Platform::DiscordWebhook
+        );
+        assert_eq!(
+            Platform::from_str("discordwebhook").unwrap(),
+            Platform::DiscordWebhook
+        );
+        assert_eq!(Platform::from_str("devto").unwrap(), Platform::Devto);
+        assert_eq!(Platform::from_str("dev.to").unwrap(), Platform::Devto);
+        assert_eq!(Platform::from_str("nostr").unwrap(), Platform::Nostr);
         assert!(Platform::from_str("unknown").is_err());
     }
 
@@ -274,6 +344,12 @@ mod tests {
             Platform::Twitch,
             Platform::Slack,
             Platform::Telegram,
+            Platform::Bluesky,
+            Platform::Mastodon,
+            Platform::Discord,
+            Platform::DiscordWebhook,
+            Platform::Devto,
+            Platform::Nostr,
         ] {
             let s = platform.as_str();
             let parsed = Platform::from_str(s).unwrap();
@@ -307,6 +383,7 @@ mod tests {
             content: "Hello world".to_string(),
             account_ids: vec![Uuid::new_v4()],
             media_urls: None,
+            images: None,
         };
         assert!(valid.validate().is_ok());
 
@@ -314,6 +391,7 @@ mod tests {
             content: String::new(),
             account_ids: vec![Uuid::new_v4()],
             media_urls: None,
+            images: None,
         };
         assert!(empty_content.validate().is_err());
 
@@ -321,6 +399,7 @@ mod tests {
             content: "Hello".to_string(),
             account_ids: vec![],
             media_urls: None,
+            images: None,
         };
         assert!(no_accounts.validate().is_err());
     }

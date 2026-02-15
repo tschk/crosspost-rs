@@ -30,11 +30,150 @@ struct FacebookPostResponse {
     id: String,
 }
 
+impl FacebookClient {
+    async fn post_with_images(
+        &self,
+        access_token: &str,
+        caption: &str,
+        images: &[crate::platform_trait::ImageEmbed],
+    ) -> Result<PostResponse> {
+        // For a single image, use /me/photos directly
+        // For multiple images, upload each as unpublished then create feed post with attached_media
+        if images.len() == 1 {
+            let img = &images[0];
+            let mime = img.mime_type.as_deref().unwrap_or("image/jpeg").to_string();
+            let part = reqwest::multipart::Part::bytes(img.data.clone())
+                .file_name("image")
+                .mime_str(&mime)
+                .map_err(|e| Error::Platform(format!("Invalid MIME type: {}", e)))?;
+            let form = reqwest::multipart::Form::new()
+                .text("caption", caption.to_string())
+                .part("source", part);
+
+            let response = self
+                .client
+                .post("https://graph.facebook.com/v18.0/me/photos")
+                .query(&[("access_token", access_token)])
+                .multipart(form)
+                .send()
+                .await
+                .map_err(|e| Error::Platform(format!("Facebook photo upload error: {}", e)))?;
+
+            if !response.status().is_success() {
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(Error::Platform(format!(
+                    "Facebook photo upload failed: {}",
+                    error_text
+                )));
+            }
+
+            let fb_response: FacebookPostResponse = response.json().await.map_err(|e| {
+                Error::Platform(format!("Failed to parse Facebook response: {}", e))
+            })?;
+
+            return Ok(PostResponse {
+                platform_post_id: fb_response.id.clone(),
+                url: Some(format!("https://facebook.com/{}", fb_response.id)),
+            });
+        }
+
+        // Multiple images: upload each as unpublished, then create feed post
+        let mut media_ids = Vec::new();
+        for img in images.iter().take(4) {
+            let mime = img.mime_type.as_deref().unwrap_or("image/jpeg").to_string();
+            let part = reqwest::multipart::Part::bytes(img.data.clone())
+                .file_name("image")
+                .mime_str(&mime)
+                .map_err(|e| Error::Platform(format!("Invalid MIME type: {}", e)))?;
+            let form = reqwest::multipart::Form::new()
+                .text("published", "false".to_string())
+                .part("source", part);
+
+            let response = self
+                .client
+                .post("https://graph.facebook.com/v18.0/me/photos")
+                .query(&[("access_token", access_token)])
+                .multipart(form)
+                .send()
+                .await
+                .map_err(|e| Error::Platform(format!("Facebook photo upload error: {}", e)))?;
+
+            if !response.status().is_success() {
+                let error_text = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                return Err(Error::Platform(format!(
+                    "Facebook photo upload failed: {}",
+                    error_text
+                )));
+            }
+
+            let fb_response: FacebookPostResponse = response.json().await.map_err(|e| {
+                Error::Platform(format!("Failed to parse Facebook response: {}", e))
+            })?;
+
+            media_ids.push(fb_response.id);
+        }
+
+        // Create feed post with attached_media
+        let mut query_params: Vec<(String, String)> = vec![
+            ("access_token".to_string(), access_token.to_string()),
+            ("message".to_string(), caption.to_string()),
+        ];
+        for (i, media_id) in media_ids.iter().enumerate() {
+            query_params.push((
+                format!("attached_media[{}]", i),
+                format!("{{\"media_fbid\":\"{}\"}}", media_id),
+            ));
+        }
+
+        let response = self
+            .client
+            .post("https://graph.facebook.com/v18.0/me/feed")
+            .query(&query_params)
+            .send()
+            .await
+            .map_err(|e| Error::Platform(format!("Facebook API error: {}", e)))?;
+
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Error::Platform(format!(
+                "Facebook API error: {}",
+                error_text
+            )));
+        }
+
+        let fb_response: FacebookPostResponse = response
+            .json()
+            .await
+            .map_err(|e| Error::Platform(format!("Failed to parse Facebook response: {}", e)))?;
+
+        Ok(PostResponse {
+            platform_post_id: fb_response.id.clone(),
+            url: Some(format!("https://facebook.com/{}", fb_response.id)),
+        })
+    }
+}
+
 #[async_trait::async_trait]
 impl Platform for FacebookClient {
     async fn post(&self, access_token: &str, request: PostRequest) -> Result<PostResponse> {
-        // Facebook posts are made to a Page's feed
-        // This is a simplified implementation
+        // If images are provided, upload via /me/photos
+        if let Some(ref images) = request.images {
+            if !images.is_empty() {
+                return self
+                    .post_with_images(access_token, &request.content, images)
+                    .await;
+            }
+        }
+
         let url = "https://graph.facebook.com/v18.0/me/feed";
 
         let body = FacebookPostRequest {
@@ -88,5 +227,9 @@ impl Platform for FacebookClient {
 
     fn platform_name(&self) -> &'static str {
         "facebook"
+    }
+
+    fn max_message_length(&self) -> usize {
+        63206
     }
 }

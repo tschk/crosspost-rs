@@ -23,7 +23,7 @@ tokio-util = "0.7"
 # Web framework
 axum = { version = "0.8", features = ["macros", "multipart"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "trace", "request-id"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "util", "set-header", "propagate-header"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -63,3 +63,8 @@ governor = "0.7"
 
 # JWT
 jsonwebtoken = "9.3"
+
+# Image processing
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+infer = "0.16"
+base64 = "0.22"

@@ -1,6 +1,7 @@
 use crate::platform_trait::{Platform, PostRequest, PostResponse};
 use crosspost_core::{Error, Result};
 use serde::Deserialize;
+use uuid::Uuid;
 
 pub struct TwitchClient {
     client: reqwest::Client,
@@ -86,8 +87,10 @@ impl Platform for TwitchClient {
             return Err(Error::Platform(format!("Twitch API error: {}", error_text)));
         }
 
+        // Twitch announcements API returns 204 No Content with no body,
+        // so we generate a unique ID to track this announcement
         Ok(PostResponse {
-            platform_post_id: format!("announcement_{}", chrono::Utc::now().timestamp()),
+            platform_post_id: format!("announcement_{}", Uuid::new_v4()),
             url: Some(format!("https://twitch.tv/{}", broadcaster_id)),
         })
     }
@@ -107,5 +110,9 @@ impl Platform for TwitchClient {
 
     fn platform_name(&self) -> &'static str {
         "twitch"
+    }
+
+    fn max_message_length(&self) -> usize {
+        500
     }
 }

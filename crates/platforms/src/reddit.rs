@@ -139,4 +139,8 @@ impl Platform for RedditClient {
     fn platform_name(&self) -> &'static str {
         "reddit"
     }
+
+    fn max_message_length(&self) -> usize {
+        40000
+    }
 }

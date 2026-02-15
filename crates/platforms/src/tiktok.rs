@@ -92,4 +92,8 @@ impl Platform for TikTokClient {
     fn platform_name(&self) -> &'static str {
         "tiktok"
     }
+
+    fn max_message_length(&self) -> usize {
+        2200
+    }
 }

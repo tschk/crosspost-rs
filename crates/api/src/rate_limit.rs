@@ -1,9 +1,9 @@
 use axum::{
     extract::Request,
     http::StatusCode,
-    middleware::Next,
     response::{IntoResponse, Response},
 };
+use crosspost_auth::Claims;
 use governor::{
     clock::DefaultClock,
     state::{InMemoryState, NotKeyed},
@@ -11,43 +11,45 @@ use governor::{
 };
 use std::{num::NonZeroU32, sync::Arc};
 
-/// Shared rate limiter type (not keyed, global per-limiter instance)
+/// Global rate limiter (for unauthenticated routes like auth endpoints)
 pub type SharedRateLimiter = Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>;
 
-/// Create a rate limiter with the given requests per second
+/// Per-user keyed rate limiter (for authenticated routes)
+pub type KeyedRateLimiter =
+    Arc<RateLimiter<String, governor::state::keyed::DashMapStateStore<String>, DefaultClock>>;
+
+/// Create a global rate limiter with the given requests per second
 pub fn create_rate_limiter(per_second: u32) -> SharedRateLimiter {
     let quota = Quota::per_second(NonZeroU32::new(per_second).expect("rate limit must be > 0"));
     Arc::new(RateLimiter::direct(quota))
 }
 
-/// Create a rate limiter with the given requests per minute
+/// Create a global rate limiter with the given requests per minute
 pub fn create_rate_limiter_per_minute(per_minute: u32) -> SharedRateLimiter {
     let quota = Quota::per_minute(NonZeroU32::new(per_minute).expect("rate limit must be > 0"));
     Arc::new(RateLimiter::direct(quota))
 }
 
-/// Rate limiting middleware
-pub async fn rate_limit_middleware(request: Request, next: Next) -> Result<Response, StatusCode> {
-    // Extract rate limiter from request extensions (set by layer)
-    let limiter = request.extensions().get::<SharedRateLimiter>().cloned();
-
-    if let Some(limiter) = limiter {
-        match limiter.check() {
-            Ok(_) => Ok(next.run(request).await),
-            Err(_) => {
-                let body = serde_json::json!({
-                    "error": "Rate limit exceeded. Please try again later.",
-                });
-                Ok((StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response())
-            }
-        }
-    } else {
-        // No rate limiter configured, pass through
-        Ok(next.run(request).await)
-    }
+/// Create a per-user keyed rate limiter with the given requests per second
+pub fn create_keyed_rate_limiter(per_second: u32) -> KeyedRateLimiter {
+    let quota = Quota::per_second(NonZeroU32::new(per_second).expect("rate limit must be > 0"));
+    Arc::new(RateLimiter::keyed(quota))
 }
 
-/// Layer that injects a rate limiter into request extensions
+/// Create a per-user keyed rate limiter with the given requests per minute
+pub fn create_keyed_rate_limiter_per_minute(per_minute: u32) -> KeyedRateLimiter {
+    let quota = Quota::per_minute(NonZeroU32::new(per_minute).expect("rate limit must be > 0"));
+    Arc::new(RateLimiter::keyed(quota))
+}
+
+fn rate_limit_response() -> Response {
+    let body = serde_json::json!({
+        "error": "Rate limit exceeded. Please try again later.",
+    });
+    (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response()
+}
+
+/// Layer for global (not-keyed) rate limiting (public routes)
 #[derive(Clone)]
 pub struct RateLimitLayer {
     limiter: SharedRateLimiter,
@@ -101,12 +103,74 @@ where
         Box::pin(async move {
             match limiter.check() {
                 Ok(_) => inner.call(request).await,
-                Err(_) => {
-                    let body = serde_json::json!({
-                        "error": "Rate limit exceeded. Please try again later.",
-                    });
-                    Ok((StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response())
-                }
+                Err(_) => Ok(rate_limit_response()),
+            }
+        })
+    }
+}
+
+/// Layer for per-user (keyed) rate limiting (authenticated routes)
+#[derive(Clone)]
+pub struct KeyedRateLimitLayer {
+    limiter: KeyedRateLimiter,
+}
+
+impl KeyedRateLimitLayer {
+    pub fn new(limiter: KeyedRateLimiter) -> Self {
+        Self { limiter }
+    }
+}
+
+impl<S> tower::Layer<S> for KeyedRateLimitLayer {
+    type Service = KeyedRateLimitService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        KeyedRateLimitService {
+            inner,
+            limiter: self.limiter.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct KeyedRateLimitService<S> {
+    inner: S,
+    limiter: KeyedRateLimiter,
+}
+
+impl<S> tower::Service<Request> for KeyedRateLimitService<S>
+where
+    S: tower::Service<Request, Response = Response> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>,
+    >;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, request: Request) -> Self::Future {
+        let limiter = self.limiter.clone();
+        let mut inner = self.inner.clone();
+
+        // Extract user_id from Claims if available (set by auth middleware)
+        let key = request
+            .extensions()
+            .get::<Claims>()
+            .map(|c| c.sub.to_string())
+            .unwrap_or_else(|| "anonymous".to_string());
+
+        Box::pin(async move {
+            match limiter.check_key(&key) {
+                Ok(_) => inner.call(request).await,
+                Err(_) => Ok(rate_limit_response()),
             }
         })
     }
@@ -119,7 +183,6 @@ mod tests {
     #[test]
     fn test_create_rate_limiter() {
         let limiter = create_rate_limiter(10);
-        // First request should succeed
         assert!(limiter.check().is_ok());
     }
 
@@ -131,15 +194,9 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_exhaustion() {
-        // Create a limiter that allows 1 request per second
         let limiter = create_rate_limiter(1);
-
-        // First request should succeed
         assert!(limiter.check().is_ok());
 
-        // Subsequent requests within the same second should fail
-        // (governor uses a token bucket, so the second request may or may not succeed
-        //  depending on timing - but a burst of many should eventually fail)
         let mut rejected = false;
         for _ in 0..100 {
             if limiter.check().is_err() {
@@ -151,5 +208,36 @@ mod tests {
             rejected,
             "Rate limiter should reject requests after exhaustion"
         );
+    }
+
+    #[test]
+    fn test_keyed_rate_limiter() {
+        let limiter = create_keyed_rate_limiter(1);
+        // Different keys should have independent limits
+        assert!(limiter.check_key(&"user1".to_string()).is_ok());
+        assert!(limiter.check_key(&"user2".to_string()).is_ok());
+    }
+
+    #[test]
+    fn test_keyed_rate_limiter_per_user_exhaustion() {
+        let limiter = create_keyed_rate_limiter(1);
+        let key = "user1".to_string();
+
+        assert!(limiter.check_key(&key).is_ok());
+
+        let mut rejected = false;
+        for _ in 0..100 {
+            if limiter.check_key(&key).is_err() {
+                rejected = true;
+                break;
+            }
+        }
+        assert!(
+            rejected,
+            "Per-user rate limiter should reject after exhaustion"
+        );
+
+        // Another user should still be able to make requests
+        assert!(limiter.check_key(&"user2".to_string()).is_ok());
     }
 }

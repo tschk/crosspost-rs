@@ -33,6 +33,15 @@ struct InstagramPostResponse {
 #[async_trait::async_trait]
 impl Platform for InstagramClient {
     async fn post(&self, access_token: &str, request: PostRequest) -> Result<PostResponse> {
+        // Instagram's Content Publishing API requires publicly hosted image URLs
+        if let Some(ref images) = request.images {
+            if !images.is_empty() {
+                return Err(Error::Platform(
+                    "Instagram requires images to be hosted at a public URL. Direct image upload is not supported.".to_string(),
+                ));
+            }
+        }
+
         // Instagram posting requires the Instagram Business Account ID
         // This is a simplified implementation
         let url = "https://graph.facebook.com/v18.0/me/media";
@@ -88,5 +97,9 @@ impl Platform for InstagramClient {
 
     fn platform_name(&self) -> &'static str {
         "instagram"
+    }
+
+    fn max_message_length(&self) -> usize {
+        2200
     }
 }

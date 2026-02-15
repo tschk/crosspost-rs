@@ -14,7 +14,8 @@ pub mod prelude {
     pub use crate::config::AppConfig;
     pub use crate::error::{Error, Result};
     pub use crate::types::{
-        ConnectedAccount, CreatePostRequest, CreatePostResponse, Platform, PlatformPost,
-        PlatformPostResult, Post, PostStatus, SchedulePostRequest, ScheduledPost, Tenant, User,
+        ConnectedAccount, CreatePostRequest, CreatePostResponse, DirectConnectRequest, ImageData,
+        PaginationQuery, Platform, PlatformPost, PlatformPostResult, Post, PostStatus,
+        SchedulePostRequest, ScheduledPost, Tenant, UpdateScheduledPostRequest, User,
     };
 }

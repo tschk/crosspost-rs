@@ -1,4 +1,6 @@
-use crosspost_core::{ConnectedAccount, Error, Post, Result, ScheduledPost, Tenant, User};
+use crosspost_core::{
+    ConnectedAccount, Error, PlatformPost, Post, PostStatus, Result, ScheduledPost, Tenant, User,
+};
 use surrealdb::engine::any::{self, Any};
 use surrealdb::Surreal;
 use uuid::Uuid;
@@ -46,6 +48,8 @@ impl SurrealDbClient {
             "DEFINE INDEX IF NOT EXISTS idx_posts_user ON posts FIELDS user_id",
             "DEFINE INDEX IF NOT EXISTS idx_posts_tenant ON posts FIELDS tenant_id",
             "DEFINE INDEX IF NOT EXISTS idx_scheduled_user ON scheduled_posts FIELDS user_id",
+            "DEFINE INDEX IF NOT EXISTS idx_users_email ON users FIELDS email UNIQUE",
+            "DEFINE INDEX IF NOT EXISTS idx_platform_posts_post ON platform_posts FIELDS post_id",
         ];
 
         for query in queries {
@@ -191,6 +195,21 @@ impl SurrealDbClient {
     }
 
     pub async fn delete_connected_account(&self, account_id: Uuid) -> Result<()> {
+        // Delete related platform_posts and remove account from scheduled_posts
+        self.db
+            .query("DELETE FROM platform_posts WHERE account_id = $account_id")
+            .bind(("account_id", account_id.to_string()))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
+        // Remove this account_id from any scheduled posts' account_ids arrays
+        self.db
+            .query("UPDATE scheduled_posts SET account_ids = array::remove(account_ids, array::find_index(account_ids, $account_id)), updated_at = $now WHERE $account_id IN account_ids")
+            .bind(("account_id", account_id.to_string()))
+            .bind(("now", chrono::Utc::now()))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
         let _: Option<ConnectedAccount> = self
             .db
             .delete(("connected_accounts", account_id.to_string()))
@@ -198,6 +217,25 @@ impl SurrealDbClient {
             .map_err(|e| Error::Database(e.to_string()))?;
 
         Ok(())
+    }
+
+    /// Get accounts with tokens expiring within the given number of minutes
+    pub async fn get_accounts_with_expiring_tokens(
+        &self,
+        minutes: i64,
+    ) -> Result<Vec<ConnectedAccount>> {
+        let threshold = chrono::Utc::now() + chrono::Duration::minutes(minutes);
+        let mut result = self
+            .db
+            .query("SELECT * FROM connected_accounts WHERE token_expires_at IS NOT NONE AND token_expires_at < $threshold AND refresh_token IS NOT NONE")
+            .bind(("threshold", threshold))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
+        let accounts: Vec<ConnectedAccount> =
+            result.take(0).map_err(|e| Error::Database(e.to_string()))?;
+
+        Ok(accounts)
     }
 
     // --- Posts ---
@@ -213,12 +251,18 @@ impl SurrealDbClient {
         created.ok_or_else(|| Error::Database("Failed to create post".to_string()))
     }
 
-    pub async fn list_posts_by_user(&self, user_id: Uuid, limit: usize) -> Result<Vec<Post>> {
+    pub async fn list_posts_by_user(
+        &self,
+        user_id: Uuid,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Post>> {
         let mut result = self
             .db
-            .query("SELECT * FROM posts WHERE user_id = $user_id ORDER BY created_at DESC LIMIT $limit")
+            .query("SELECT * FROM posts WHERE user_id = $user_id ORDER BY created_at DESC LIMIT $limit START $offset")
             .bind(("user_id", user_id.to_string()))
             .bind(("limit", limit))
+            .bind(("offset", offset))
             .await
             .map_err(|e| Error::Database(e.to_string()))?;
 
@@ -252,6 +296,124 @@ impl SurrealDbClient {
             result.take(0).map_err(|e| Error::Database(e.to_string()))?;
 
         Ok(posts)
+    }
+
+    pub async fn get_scheduled_post(&self, id: Uuid) -> Result<Option<ScheduledPost>> {
+        let result: Option<ScheduledPost> = self
+            .db
+            .select(("scheduled_posts", id.to_string()))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+        Ok(result)
+    }
+
+    pub async fn delete_scheduled_post(&self, id: Uuid) -> Result<()> {
+        let _: Option<ScheduledPost> = self
+            .db
+            .delete(("scheduled_posts", id.to_string()))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    pub async fn update_scheduled_post(
+        &self,
+        id: Uuid,
+        content: Option<String>,
+        scheduled_for: Option<chrono::DateTime<chrono::Utc>>,
+        account_ids: Option<Vec<Uuid>>,
+    ) -> Result<()> {
+        let mut updates = vec!["updated_at = $now"];
+        if content.is_some() {
+            updates.push("content = $content");
+        }
+        if scheduled_for.is_some() {
+            updates.push("scheduled_for = $scheduled_for");
+        }
+        if account_ids.is_some() {
+            updates.push("account_ids = $account_ids");
+        }
+
+        let query = format!(
+            "UPDATE scheduled_posts SET {} WHERE id = $id AND status = 'scheduled'",
+            updates.join(", ")
+        );
+
+        self.db
+            .query(&query)
+            .bind(("id", id.to_string()))
+            .bind(("now", chrono::Utc::now()))
+            .bind(("content", content))
+            .bind(("scheduled_for", scheduled_for))
+            .bind((
+                "account_ids",
+                account_ids.map(|ids| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>()),
+            ))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
+        Ok(())
+    }
+
+    // --- Platform Posts ---
+
+    pub async fn create_platform_post(&self, post: PlatformPost) -> Result<PlatformPost> {
+        let created: Option<PlatformPost> = self
+            .db
+            .create(("platform_posts", post.id.to_string()))
+            .content(post)
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
+        created.ok_or_else(|| Error::Database("Failed to create platform post".to_string()))
+    }
+
+    pub async fn list_platform_posts_by_post(&self, post_id: Uuid) -> Result<Vec<PlatformPost>> {
+        let mut result = self
+            .db
+            .query("SELECT * FROM platform_posts WHERE post_id = $post_id ORDER BY created_at DESC")
+            .bind(("post_id", post_id.to_string()))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
+        let posts: Vec<PlatformPost> =
+            result.take(0).map_err(|e| Error::Database(e.to_string()))?;
+
+        Ok(posts)
+    }
+
+    // --- Scheduled Post Execution ---
+
+    pub async fn get_due_scheduled_posts(&self) -> Result<Vec<ScheduledPost>> {
+        let mut result = self
+            .db
+            .query("SELECT * FROM scheduled_posts WHERE status = 'scheduled' AND scheduled_for <= time::now()")
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
+        let posts: Vec<ScheduledPost> =
+            result.take(0).map_err(|e| Error::Database(e.to_string()))?;
+
+        Ok(posts)
+    }
+
+    pub async fn update_scheduled_post_status(&self, id: Uuid, status: PostStatus) -> Result<()> {
+        self.db
+            .query("UPDATE scheduled_posts SET status = $status, updated_at = $now WHERE id = $id")
+            .bind(("id", id.to_string()))
+            .bind((
+                "status",
+                serde_json::to_value(status)
+                    .unwrap_or_default()
+                    .as_str()
+                    .unwrap_or("failed")
+                    .to_string(),
+            ))
+            .bind(("now", chrono::Utc::now()))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+
+        Ok(())
     }
 }
 

@@ -1,12 +1,14 @@
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use crosspost_core::{ConnectedAccount, Error, Result};
 use crosspost_db::SurrealDbClient;
 use oauth2::basic::BasicClient;
+use oauth2::TokenResponse;
 use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct TokenManager {
     db: Arc<SurrealDbClient>,
+    #[allow(dead_code)]
     oauth_handler: Arc<crate::OAuthHandler>,
 }
 
@@ -46,12 +48,10 @@ impl TokenManager {
                 .map_err(|e| Error::OAuth(format!("Failed to refresh token: {}", e)))?;
 
             let new_access_token = token_result.access_token().secret().clone();
-            let new_refresh_token = token_result
-                .refresh_token()
-                .map(|t| t.secret().clone());
-            let expires_at = token_result.expires_in().map(|duration| {
-                Utc::now() + Duration::seconds(duration.as_secs() as i64)
-            });
+            let new_refresh_token = token_result.refresh_token().map(|t| t.secret().clone());
+            let expires_at = token_result
+                .expires_in()
+                .map(|duration| Utc::now() + Duration::seconds(duration.as_secs() as i64));
 
             // Update in database
             self.db

@@ -1,4 +1,4 @@
-use crosspost_core::{Error, Result};
+use crosspost_core::Result;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -2,11 +2,12 @@ use crosspost_core::{Error, Platform, Result};
 use crosspost_db::SurrealDbClient;
 use oauth2::{
     basic::BasicClient, reqwest::async_http_client, AuthUrl, AuthorizationCode, ClientId,
-    ClientSecret, CsrfToken, RedirectUrl, Scope, TokenResponse, TokenUrl,
+    ClientSecret, CsrfToken, RedirectUrl, Scope, TokenUrl,
 };
 use std::sync::Arc;
 
 pub struct OAuthHandler {
+    #[allow(dead_code)]
     db: Arc<SurrealDbClient>,
 }
 
@@ -62,7 +63,9 @@ impl OAuthHandler {
         &self,
         client: &BasicClient,
         code: String,
-    ) -> Result<oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>> {
+    ) -> Result<
+        oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
+    > {
         let token = client
             .exchange_code(AuthorizationCode::new(code))
             .request_async(async_http_client)

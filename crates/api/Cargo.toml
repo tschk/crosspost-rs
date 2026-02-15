@@ -30,3 +30,6 @@ tracing-subscriber = { workspace = true }
 config = { workspace = true }
 dotenvy = { workspace = true }
 governor = { workspace = true }
+validator = { workspace = true }
+oauth2 = { workspace = true }
+jsonwebtoken = { workspace = true }

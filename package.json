@@ -1,6 +1,6 @@
 {
-  "name": "@humanwhocodes/crosspost",
-  "version": "1.0.3",
+  "name": "crosspost-rs",
+  "version": "0.0.1-dev",
   "description": "A utility to post across multiple social networks.",
   "type": "module",
   "main": "dist/index.js",

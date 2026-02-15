@@ -60,3 +60,6 @@ uuid = { version = "1.11", features = ["v4", "serde"] }
 
 # Rate limiting
 governor = "0.7"
+
+# JWT
+jsonwebtoken = "9.3"

@@ -1,524 +1,411 @@
-# Crosspost
+# crosspost-rs
 
-by [Nicholas C. Zakas](https://humanwhocodes.com)
+🚀 **Multi-tenant SaaS platform for cross-posting content to social media** - Rust rewrite of the popular [crosspost library](https://github.com/humanwhocodes/crosspost)
 
-If you find this useful, please consider supporting my work with a [donation](https://humanwhocodes.com/donate).
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.83%2B-orange.svg)](https://www.rust-lang.org)
+[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)]()
 
-## Description
+---
 
-A utility for posting across multiple social networks at once.
+## ⚠️ Project Status: Alpha (Foundation Complete)
 
-## Installation
+This is an **active rewrite** from JavaScript to Rust. The foundation is complete (~20% of planned features), but significant work remains. See [TODO.md](TODO.md) for the complete task list and progress.
 
-```shell
-npm install @humanwhocodes/crosspost
-```
+**Current Capabilities:**
+- ✅ Core types and error handling
+- ✅ Database layer (SurrealDB + RocksDB)
+- ✅ Basic OAuth structure
+- ✅ API framework with Axum
+- ✅ Docker deployment setup
+- 🚧 Platform integrations (partial)
+- 📋 Rate limiting (planned)
+- 📋 Scheduling (planned)
+- 📋 Production testing (planned)
 
-## Usage
+**See [TODO.md](TODO.md) for detailed implementation status and roadmap.**
 
-### API Usage
+---
 
-The API is split into two parts:
+## 🎯 Overview
 
-1. The `Client` class that can be used to post the same message across multiple services.
-1. A number of different strategy implementations, one for each service:
-    - `BlueskyStrategy`
-    - `MastodonStrategy`
-    - `TwitterStrategy`
-    - `LinkedInStrategy`
-    - `DiscordStrategy`
-    - `DiscordWebhookStrategy`
-    - `TelegramStrategy`
-    - `DevtoStrategy`
-    - `NostrStrategy` (requires Node.js v22+)
+Crosspost-RS is a complete rewrite and expansion of the original JavaScript crosspost library, transforming it from a simple utility into a production-ready multi-tenant SaaS platform. Built for marketing agencies managing multiple clients, each with multiple social media accounts.
 
-Each strategy requires its own parameters that are specific to the service. If you only want to post to a particular service, you can just directly use the strategy for that service.
+### Key Differences from JavaScript Version
 
-```js
-import {
-	Client,
-	TwitterStrategy,
-	MastodonStrategy,
-	BlueskyStrategy,
-	LinkedInStrategy,
-	DiscordStrategy,
-	DiscordWebhookStrategy,
-	TelegramStrategy,
-	DevtoStrategy,
-	NostrStrategy,
-} from "@humanwhocodes/crosspost";
+| Feature | JavaScript Library | Rust SaaS Platform |
+|---------|-------------------|-------------------|
+| Architecture | Single-user library | Multi-tenant SaaS |
+| Auth | API keys/tokens | OAuth2 flows |
+| Storage | None | SurrealDB + RocksDB |
+| Accounts | One per platform | Multiple per platform per user |
+| Deployment | NPM package | Docker containers |
+| API | Client library | REST API |
+| Scheduling | None | Built-in scheduler |
+| Rate Limiting | Manual | Automatic per-platform |
 
-// Note: Use an app password, not your login password!
-const bluesky = new BlueskyStrategy({
-	identifier: "me.you.social",
-	password: "your-app-password",
-	host: "you.social", // "bsky.social" for most people
-});
+---
 
-// Note: Personal access token is required
-const mastodon = new MastodonStrategy({
-	accessToken: "your-access-token",
-	host: "mastodon.host",
-});
-
-// Note: OAuth app is required
-const twitter = new TwitterStrategy({
-	accessTokenKey: "access-token-key",
-	accessTokenSecret: "access-token-secret",
-	apiConsumerKey: "api-consumer-key",
-	apiConsumerSecret: "api-consumer-secret",
-});
-
-// Note: OAuth access token is required
-const linkedin = new LinkedInStrategy({
-	accessToken: "your-access-token",
-});
-
-// Note: Bot token and channel ID required
-const discord = new DiscordStrategy({
-	botToken: "your-bot-token",
-	channelId: "your-channel-id",
-});
-
-// Note: Webhook URL required
-const discordWebhook = new DiscordWebhookStrategy({
-	webhookUrl: "your-webhook-url",
-});
-
-// Note: Bot token and chat ID required
-const telegram = new TelegramStrategy({
-	botToken: "your-bot-token",
-	chatId: "your-chat-id",
-});
-
-// Note: API key required
-const devto = new DevtoStrategy({
-	apiKey: "your-api-key",
-});
-
-// Note: Private key and relays required
-const nostr = new NostrStrategy({
-	privateKey: "your-private-key", // hex or bech32 format
-	relays: ["wss://relay.example.com", "wss://relay2.example.com"],
-});
-
-// create a client that will post to all services
-const client = new Client({
-	strategies: [
-		bluesky,
-		mastodon,
-		twitter,
-		linkedin,
-		discord,
-		discordWebhook,
-		telegram,
-		devto,
-		nostr,
-	],
-});
-
-// post to all services with up to 4 images (must be PNG, JPEG, or GIF)
-await client.post("Hello world!", {
-	images: [
-		{
-			data: imageData, // Uint8Array of image data
-			alt: "Description of the image",
-		},
-	],
-});
-
-// post to all services with an abort signal
-const controller = new AbortController();
-await client.post("Hello world!", { signal: controller.signal });
-
-// post to specific services using postTo
-await client.postTo([
-	{
-		message: "Hello Twitter!",
-		strategyId: "twitter", // Uses the strategy's id property
-	},
-	{
-		message: "Hello Mastodon and Bluesky!",
-		strategyId: "mastodon",
-		images: [
-			{
-				data: imageData, // Uint8Array of image data
-				alt: "Description of the image",
-			},
-		],
-	},
-	{
-		message: "Hello Bluesky!",
-		strategyId: "bluesky",
-	},
-]);
-
-// post to specific services with a signal
-await client.postTo(
-	[
-		{
-			message: "Hello Twitter!",
-			strategyId: "twitter",
-		},
-		{
-			message: "Hello Mastodon!",
-			strategyId: "mastodon",
-		},
-	],
-	{ signal: controller.signal },
-);
-```
-
-### CLI Usage
-
-Crosspost also has a command line interface to allow for incorporation into CI systems.
+## 🏗️ Architecture
 
 ```
-Usage: crosspost [options] ["Message to post."]
---twitter, -t   Post to Twitter.
---mastodon, -m  Post to Mastodon.
---bluesky, -b   Post to Bluesky.
---linkedin, -l  Post to LinkedIn.
---discord, -d   Post to Discord via bot.
---discord-webhook  Post to Discord via webhook.
---devto         Post to dev.to.
---telegram      Post to Telegram.
---slack, -s     Post to Slack.
---nostr, -n     Post to Nostr.
---mcp           Start MCP server.
---file          The file to read the message from.
---image         The image file to upload with the message.
---image-alt     Alt text for the image (default: filename).
---help, -h      Show this message.
---version, -v   Show version number.
+┌─────────────────────────────────────────────────────────┐
+│                     Axum API Server                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
+│  │   OAuth      │  │   Posting    │  │  Scheduling  │ │
+│  │  Endpoints   │  │  Endpoints   │  │  Endpoints   │ │
+│  └──────────────┘  └──────────────┘  └──────────────┘ │
+└─────────────────────────────────────────────────────────┘
+                            │
+        ┌───────────────────┼───────────────────┐
+        │                   │                   │
+  ┌─────▼─────┐      ┌──────▼──────┐     ┌─────▼─────┐
+  │ SurrealDB │      │  RocksDB    │     │ Platform  │
+  │           │      │             │     │  Clients  │
+  │ • Users   │      │ • Tokens    │     │           │
+  │ • Tenants │      │ • Rate      │     │ Twitter   │
+  │ • Accounts│      │   Limits    │     │ Facebook  │
+  │ • Posts   │      │             │     │ Instagram │
+  └───────────┘      └─────────────┘     │ LinkedIn  │
+                                          │ YouTube   │
+                                          │ TikTok    │
+                                          │ Reddit    │
+                                          │ Twitch    │
+                                          │ Slack     │
+                                          │ Telegram  │
+                                          └───────────┘
 ```
 
-Examples:
+### Crate Structure
 
-```shell
-# Post a message to multiple services
-npx @humanwhocodes/crosspost -t -m -b "Check out this beach!"
-
-# Post a message with an image to multiple services
-npx @humanwhocodes/crosspost -t -m -b --image ./photo.jpg --image-alt "A beautiful sunset" "Check out this beach!"
+```
+crosspost-rs/
+├── crates/
+│   ├── core/           # Shared types, errors, config (267 lines)
+│   ├── auth/           # OAuth2, token management (250 lines)
+│   ├── db/             # SurrealDB + RocksDB clients (370 lines)
+│   ├── platforms/      # Platform API clients (290 lines)
+│   └── api/            # Axum server & endpoints (560 lines)
+├── migrations/         # Database migrations (planned)
+├── Dockerfile          # Production container
+├── docker-compose.yml  # Local development
+└── TODO.md            # Complete task list
 ```
 
-This posts the message `"Hello world!"` to Twitter, Mastodon, and Bluesky with an attached image. You can choose to post to any combination by specifying the appropriate command line options.
+---
 
-You can also read the message from a file instead of from the command line:
+## 🚀 Quick Start
 
-```shell
-# Post a message to multiple services
-npx @humanwhocodes/crosspost -t -m -b -f message.txt
+### Prerequisites
 
-# Post a message with an image to multiple services
-npx @humanwhocodes/crosspost -t -m -b -f message.txt -i path/to/image.jpg
+- Rust 1.83 or later
+- Docker & Docker Compose (for easy setup)
+- Or: SurrealDB and RocksDB locally
+
+### Option 1: Docker (Recommended)
+
+```bash
+# Clone the repository
+git clone https://github.com/GraftAI-com/crosspost-rs.git
+cd crosspost-rs
+
+# Copy environment template
+cp .env.example .env
+
+# Edit .env with your OAuth credentials
+# (See "Platform Setup" section below)
+
+# Start all services
+docker-compose up -d
+
+# Check logs
+docker-compose logs -f crosspost-api
 ```
 
-Each strategy requires a set of environment variables in order to execute:
+API will be available at `http://localhost:3000`
 
-- Twitter
-    - `TWITTER_ACCESS_TOKEN_KEY`
-    - `TWITTER_ACCESS_TOKEN_SECRET`
-    - `TWITTER_API_CONSUMER_KEY`
-    - `TWITTER_API_CONSUMER_SECRET`
-- Mastodon
-    - `MASTODON_ACCESS_TOKEN`
-    - `MASTODON_HOST`
-- Bluesky
-    - `BLUESKY_HOST`
-    - `BLUESKY_IDENTIFIER`
-    - `BLUESKY_PASSWORD`
-- LinkedIn
-    - `LINKEDIN_ACCESS_TOKEN`
-- Discord
-    - `DISCORD_BOT_TOKEN`
-    - `DISCORD_CHANNEL_ID`
-- Discord Webhook
-    - `DISCORD_WEBHOOK_URL`
-- dev.to
-    - `DEVTO_API_KEY`
-- Telegram
-    - `TELEGRAM_BOT_TOKEN`
-    - `TELEGRAM_CHAT_ID`
-- Slack
-    - `SLACK_TOKEN`
-    - `SLACK_CHANNEL`
-- Nostr
-    - `NOSTR_PRIVATE_KEY`
-    - `NOSTR_RELAYS`
+### Option 2: Local Development
 
-Tip: You can load environment variables from a `.env` file by setting the environment variable `CROSSPOST_DOTENV`. Set it to `1` to use `.env` in the current working directory, or set it to a specific filepath to use a different location.
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-### MCP Server Usage
+# Install SurrealDB
+curl -sSf https://install.surrealdb.com | sh
 
-Crosspost can be run as an MCP (Model Context Protocol) server, which allows it to be used by AI agents:
+# Clone and build
+git clone https://github.com/GraftAI-com/crosspost-rs.git
+cd crosspost-rs
+cargo build --release
 
-```shell
-npx @humanwhocodes/crosspost --mcp -t -m -b
+# Start SurrealDB
+surreal start --log trace --user root --pass root memory
+
+# Set environment variables
+export DATABASE__SURREALDB_URL=ws://localhost:8000
+export DATABASE__ROCKSDB_PATH=./data/rocksdb
+export SERVER__HOST=0.0.0.0
+export SERVER__PORT=3000
+
+# Run the server
+cargo run --bin crosspost-server
 ```
 
-This starts an MCP server that can post to Twitter, Mastodon, and Bluesky. The server provides prompts and tools for posting to all services or individual services. Only the services indicated by the flags are available via the server.
+---
 
-To run the MCP server through the [MCP Inspector](https://github.com/modelcontextprotocol/inspector) for debugging purposes, run the following command:
+## 📚 API Documentation
 
-```shell
-npx run mcp:inspect -- -t -m -b
+### Health Check
+
+```bash
+curl http://localhost:3000/health
 ```
 
-#### Using the MCP Server with Claude Desktop
+### OAuth Flow
 
-To use the MCP server with Claude you must have [Node.js](https://nodejs.org) installed.
-Then, in Claude Desktop:
+1. **Initiate Connection**
+```bash
+curl -X POST http://localhost:3000/auth/twitter/connect \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID"
 
-1. Click on File -> Settings.
-1. Select "Developer".
-1. Click "Edit Config".
-
-Claude will then create a `claude_desktop_config.json` file. Open it and add the following:
-
-```json
+# Returns:
 {
-	"mcpServers": {
-		"crosspost": {
-			"command": "npx",
-			"args": ["@humanwhocodes/crosspost", "-m", "-l", "--mcp"],
-			"env": {
-				"LINKEDIN_ACCESS_TOKEN": "abcdefghijklmnop",
-				"MASTODON_ACCESS_TOKEN": "abcdefghijklmnop",
-				"MASTODON_HOST": "mastodon.social"
-			}
-		}
-	}
+  "authorization_url": "https://twitter.com/oauth/authorize?...",
+  "state": "random-csrf-token"
 }
 ```
 
-This example enables Mastodon and LinkedIn so the `env` key contains the environment variables necessary to post to those services. You can customize the services by passing different command line arguments as you would using the CLI.
+2. **User authorizes on platform** (redirected to authorization_url)
 
-If you'd prefer not to put your environment variables directly into the JSON file, you can create a `.env` file and use the `CROSSPOST_DOTENV` environment variable to point to it:
+3. **Callback handled automatically** at `/auth/{platform}/callback`
 
-```json
+4. **Account is connected** and stored in database
+
+### List Connected Accounts
+
+```bash
+curl http://localhost:3000/accounts \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID"
+```
+
+### Create Cross-Post
+
+```bash
+curl -X POST http://localhost:3000/post \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Hello from Crosspost-RS! 🚀",
+    "platform_accounts": [
+      "twitter-account-uuid",
+      "facebook-account-uuid"
+    ],
+    "media": []
+  }'
+
+# Returns:
 {
-	"mcpServers": {
-		"crosspost": {
-			"command": "npx",
-			"args": ["@humanwhocodes/crosspost", "-m", "-l", "-t", "--mcp"],
-			"env": {
-				"CROSSPOST_DOTENV": "/usr/nzakas/settings/.env"
-			}
-		}
-	}
+  "post_id": "uuid",
+  "results": [
+    {
+      "platform": "twitter",
+      "success": true,
+      "platform_post_id": "1234567890",
+      "url": "https://twitter.com/user/status/1234567890"
+    },
+    {
+      "platform": "facebook",
+      "success": true,
+      "platform_post_id": "98765_43210",
+      "url": "https://facebook.com/98765/posts/43210"
+    }
+  ]
 }
 ```
 
-Here are some prompts you can try:
+### Schedule a Post
 
-- "Crosspost this message: Hello world!" (posts to all available services)
-- "Post this to Twitter: Hello X!" (posts just to Twitter)
-- "Post this to Mastodon and Bluesky: Hello friends!" (posts to Mastodon and Bluesky)
+```bash
+curl -X POST http://localhost:3000/schedule \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "X-Tenant-ID: YOUR_TENANT_ID" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content": "Scheduled post for tomorrow",
+    "platform_accounts": ["twitter-account-uuid"],
+    "scheduled_for": "2026-02-15T09:00:00Z"
+  }'
+```
 
-## Setting up Strategies
+---
 
-Each strategy uses the service's preferred way of posting messages, so you'll need to follow specific steps in order to enable API access.
+## 🔧 Platform Setup
 
-### Twitter
+Each platform requires OAuth2 credentials. Follow these guides:
 
-To enable posting on Twitter, you'll need to create a free developer account and an OAuth application. Follow [these instructions](https://humanwhocodes.com/blog/2023/04/automating-tweets-v2-api/).
+### Twitter/X
+1. Go to [Twitter Developer Portal](https://developer.twitter.com/en/portal/dashboard)
+2. Create a new app
+3. Enable OAuth 2.0
+4. Set redirect URI: `http://localhost:3000/auth/twitter/callback`
+5. Add to `.env`:
+```env
+TWITTER_CLIENT_ID=your_client_id
+TWITTER_CLIENT_SECRET=your_client_secret
+```
 
-Generally speaking, if you are creating an app to automate your own posts, you'll be able to use it for free so long as you're not posting a large number of times per day.
+### Facebook
+1. Go to [Facebook Developers](https://developers.facebook.com/)
+2. Create an app
+3. Add "Facebook Login" product
+4. Set Valid OAuth Redirect URIs: `http://localhost:3000/auth/facebook/callback`
+5. Add to `.env`:
+```env
+FACEBOOK_APP_ID=your_app_id
+FACEBOOK_APP_SECRET=your_app_secret
+```
 
-**Note:** The post uses the terms "app key" and "app secret" whereas the Twitter strategy here uses "API consumer key" and "API consumer secret". They are the same values.
-
-### Mastodon
-
-To enable posting to Mastodon, you'll need to create a new application:
-
-1. Log in to your Mastodon server.
-1. Click on "Edit Profile".
-1. Click on "Development".
-1. Click "New Application".
-1. Give your application a name.
-1. Check off `write:statuses` for your scope. If you want to upload images, check off `write:media` too.
-1. Click "Submit".
-
-This will generate a client key, client secret, and access token. You only need to use the access token when posting via the API.
-
-### Bluesky
-
-Bluesky doesn't require an application for automated posts, only your identifier and an app password. To generate an app password:
-
-1. Log in to your Bluesky account.
-1. Click "Settings".
-1. Click "Privacy and Security."
-1. Click "App Passwords".
-1. Click "Add App Password".
-1. Name your app password and click "Next".
-1. Copy the generated password and click "Done".
-
-**Important:** Do not use your login password with the API.
+### Instagram
+(Uses Facebook OAuth - requires business account)
+```env
+INSTAGRAM_APP_ID=your_facebook_app_id
+INSTAGRAM_APP_SECRET=your_facebook_app_secret
+```
 
 ### LinkedIn
+1. Go to [LinkedIn Developers](https://www.linkedin.com/developers/)
+2. Create an app
+3. Request "Share on LinkedIn" product
+4. Add redirect URL: `http://localhost:3000/auth/linkedin/callback`
+```env
+LINKEDIN_CLIENT_ID=your_client_id
+LINKEDIN_CLIENT_SECRET=your_client_secret
+```
 
-To enable posting to LinkedIn, follow these steps:
+*See [SETUP.md](SETUP.md) for complete platform setup instructions*
 
-1. Go to [LinkedIn Developers](https://www.linkedin.com/developers/).
-2. Click "Create app".
-3. Fill in your application details.
-4. Click "Create App" (yes, again).
-5. Click on the "Settings" tab.
-6. Next to "LinkedIn Page" click "Verify".
-7. Go to the generated URL to link your page to your app.
-8. Under "Available Products", request access to "Share on LinkedIn" and "Sign in with LinkedIn using OpenID Connect".
-9. Go to [OAuth 2.0 Tools](https://www.linkedin.com/developers/tools/oauth) and click "Create Token".
-10. Select your app from the dropdown.
-11. Check the box next to `openid`, `profile` and `w_member_social` scopes.
-12. Click "Request Access Token".
-13. Use your profile to grant access to your app by clicking "Allow".
+---
 
-**Important:** Tokens automatically expire after two months.
+## 🔐 Multi-Tenant Architecture
 
-### Discord Bot
+### Tenant Isolation
 
-To enable posting to Discord using a bot, you'll need to create a bot and get its token:
+Every request must include:
+- `Authorization: Bearer <jwt_token>` - Contains user ID and tenant ID
+- `X-Tenant-ID: <tenant_id>` - Verified against JWT
 
-1. Go to the [Discord Developer Portal](https://discord.com/developers/applications).
-2. Click "New Application".
-3. Give your application a name and click "Create".
-4. Click "Installation" in the left sidebar.
-5. Under "Install Link" select "None".
-6. Click "Save Changes".
-7. Click on "Bot" in the left sidebar.
-8. Uncheck "Public Bot" to ensure no one else can add this bot.
-9. Under "Text Permissions" check "Send Messages".
-10. Click "Save Changes".
-11. Click "Reset Token" and copy the bot token that appears.
+### Database Scoping
 
-To add the bot to your server:
+All queries are automatically scoped by tenant ID:
+```rust
+// Automatic tenant scoping
+let accounts = db.list_connected_accounts_by_user(user_id).await?;
+// Only returns accounts for the user's tenant
+```
 
-1. In the Developer Portal, click on "OAuth2" in the left sidebar.
-2. Under "OAuth2 URL Generator", check "bot".
-3. Under "Bot Permissions", check "Send Messages" under "Text Permissions".
-4. Copy the generated URL and open it in your browser.
-5. Select your server and authorize the bot.
+### Security Features
 
-To get your channel ID:
+- JWT-based authentication
+- Tenant-level data isolation
+- Per-user rate limiting
+- OAuth token encryption at rest
+- Audit logging (planned)
 
-1. Enable Developer Mode in Discord (User Settings > Advanced > Developer Mode).
-2. Right-click the channel you want to post to.
-3. Click "Copy Channel ID".
+---
 
-**Note:** By default your application will only be able to send messages to public channels. To send messages to private channels, you'll have to give your application the necessary permissions.
+## 📊 Supported Platforms
 
-### Discord Webhook
+| Platform | OAuth | Post Text | Post Images | Status |
+|----------|-------|-----------|-------------|--------|
+| Twitter  | ✅    | ✅        | 📋         | 🚧 In Progress |
+| Facebook | ✅    | ✅        | 📋         | 🚧 In Progress |
+| Instagram| ✅    | ✅        | 📋         | 🚧 In Progress |
+| LinkedIn | 📋   | 📋        | 📋         | 📋 Planned |
+| YouTube  | 📋   | 📋        | 📋         | 📋 Planned |
+| TikTok   | 📋   | 📋        | 📋         | 📋 Planned |
+| Reddit   | 📋   | 📋        | 📋         | 📋 Planned |
+| Twitch   | 📋   | 📋        | 📋         | 📋 Planned |
+| Slack    | 📋   | 📋        | 📋         | 📋 Planned |
+| Telegram | 📋   | 📋        | 📋         | 📋 Planned |
 
-To enable posting to Discord using a webhook, you'll need to create a webhook and get its URL:
+Legend: ✅ Complete | 🚧 In Progress | 📋 Planned
 
-1. Open Discord and navigate to the server you want to create the webhook for.
-2. Click on the server name at the top of the channel list to open the server settings.
-3. In the server settings, click on "Integrations" in the left sidebar.
-4. Click on "Webhooks".
-5. Click the "New Webhook" button.
-6. Give your webhook a name and select the channel you want to post to.
-7. Click the "Copy Webhook URL" button to copy the webhook URL.
-8. Click "Save Changes".
+---
 
-Use the copied webhook URL as the `webhookUrl` parameter in the `DiscordWebhookStrategy` configuration.
+## 🧪 Testing
 
-### Dev.to
+```bash
+# Run all tests
+cargo test
 
-To enable posting to Dev.to:
+# Run specific crate tests
+cargo test -p crosspost-core
+cargo test -p crosspost-platforms
 
-1. Log in to your [Dev.to](https://dev.to) account.
-2. Click on your profile picture in the top right.
-3. Click "Settings".
-4. Click "Extensions" in the left sidebar.
-5. Scroll down to "DEV Community API Keys".
-6. Enter a description for your API key and click "Generate API Key".
-7. Copy the generated API key.
+# Run with output
+cargo test -- --nocapture
 
-Use this API key as the value for the `DEVTO_API_KEY` environment variable when using the CLI.
+# Run integration tests
+cargo test --test '*'
+```
 
-The first line of your post will be used as the article title on Dev.to.
+⚠️ **Note**: Test suite is currently being developed. See [TODO.md](TODO.md) for testing roadmap.
 
-### Telegram
+---
 
-To enable posting to Telegram using a bot:
+## 🚦 Rate Limiting
 
-1. Start a chat with [@BotFather](https://t.me/BotFather) on Telegram.
-2. Send the command `/newbot`.
-3. Follow the prompts to create a new bot:
-    - Provide a name for your bot (e.g., "My Crosspost Bot")
-    - Provide a username for your bot (must end with "bot", e.g., "mycrosspost_bot")
-4. BotFather will provide you with a token, which will look something like `4839574812:AAFD39kkdpWt3ywyRZergyOLMaJhac60qc`.
-5. Copy this token and use it as the value for the `TELEGRAM_BOT_TOKEN` environment variable.
+Each platform has different rate limits. Crosspost-RS automatically manages these:
 
-For the `TELEGRAM_CHAT_ID` (required):
+| Platform | Limit | Window |
+|----------|-------|--------|
+| Twitter  | 300 posts | 3 hours |
+| Facebook | Varies | Per page |
+| Instagram| 25 posts | 24 hours |
+| LinkedIn | 150 posts | 24 hours |
 
-- You can specify any Telegram username such as `@username`.
-- To get your own chat ID, you can message [@userinfobot](https://t.me/userinfobot) on Telegram.
-- For group chat IDs, add your bot to the group and use a service like [@RawDataBot](https://t.me/RawDataBot) to get the chat ID.
-- Set the value as the `TELEGRAM_CHAT_ID` environment variable.
+Rate limits are tracked in RocksDB with sliding window algorithm.
 
-### Slack
+---
 
-To enable posting to Slack using a bot:
+## 📈 Monitoring
 
-1. Go to the [Slack API website](https://api.slack.com/apps) and click "Create New App".
-2. Select "From scratch" and provide an app name and select your Slack workspace.
-3. Click "Create App".
-4. In the left sidebar, click "OAuth & Permissions".
-5. Scroll down to "Scopes" and under "Bot Token Scopes", add the following scopes:
-    - `chat:write` - Send messages as the bot user
-    - `files:write` - Upload files as the bot user (required for image support)
-6. Scroll to the top and click "Install to Workspace".
-7. Review the permissions and click "Allow".
-8. Copy the "Bot User OAuth Token" that starts with `xoxb-`. This is your `SLACK_TOKEN`.
+### Health Endpoints
 
-To get your channel ID:
+```bash
+# Basic health check
+curl http://localhost:3000/health
 
-1. In Slack, right-click on the channel you want to post to.
-2. Select "Copy link".
-3. The channel ID is the part after the last slash in the URL (e.g., `C1234567890`).
-4. Alternatively, you can use the channel name (e.g., `#general`).
+# Database health (planned)
+curl http://localhost:3000/health/db
 
-Use the bot token as the `SLACK_TOKEN` environment variable and the channel ID or name as the `SLACK_CHANNEL` environment variable.
+# Metrics (planned, Prometheus format)
+curl http://localhost:3000/metrics
+```
 
-**Note:** The bot must be added to the channel you want to post to. You can do this by mentioning the bot in the channel (e.g., `@your-bot-name`) or by using the `/invite @your-bot-name` command.
+### Logging
 
-**Note:** Your bot can only send messages to users who have previously messaged the bot or added it to a group.
+Structured logging with tracing:
 
-### Nostr
+```bash
+# Set log level
+export RUST_LOG=debug
 
-To enable posting to Nostr relays:
+# Or per-module
+export RUST_LOG=crosspost_api=debug,crosspost_platforms=trace
+```
 
-For the `NOSTR_PRIVATE_KEY` (required):
+## 📄 License
 
-1. Generate a new private key or use an existing one.
-2. The private key can be in hex format (64 characters) or bech32 format starting with `nsec1`.
+Polyform Shield 1.0.0 - See [LICENSE](LICENSE) for details
 
-For the `NOSTR_RELAYS` (required):
+---
 
-1. Relay URLs should use WebSocket protocol (`wss://` for secure or `ws://` for insecure).
-2. Provide multiple relays separated by commas (e.g., `"wss://relay.damus.io","wss://relay.nostr.band","wss://nos.lol"`).
+## 🙏 Acknowledgments
 
-Nostr posts are "short text notes" (kind 1 events) with a 280 character limit. Images are not supported in Nostr text notes.
-
-**Important:** Nostr support only works in Node.js v22+.
-
-**Security:** Keep your private key secure and never share it. Consider using a dedicated key for crossposting rather than your main Nostr identity key.
-
-## License
-
-Copyright 2024-2025 Nicholas C. Zakas
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+- Original [crosspost library](https://github.com/humanwhocodes/crosspost) by [Nicholas C. Zakas](https://humanwhocodes.com)
+- Inspired by the need for enterprise-grade social media management tools
+- Built with amazing Rust ecosystem crates: Axum, SurrealDB, Tokio, and many more

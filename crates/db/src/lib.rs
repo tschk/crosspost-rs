@@ -1,8 +1,8 @@
+pub mod cache_client;
 pub mod surrealdb_client;
-pub mod rocksdb_client;
 
+pub use cache_client::CacheClient;
 pub use surrealdb_client::SurrealDbClient;
-pub use rocksdb_client::RocksDbClient;
 
 use crosspost_core::Result;
 

@@ -1,4 +1,5 @@
-pub mod auth;
 pub mod accounts;
-pub mod posts;
+pub mod auth;
 pub mod health;
+pub mod posts;
+pub mod user_auth;

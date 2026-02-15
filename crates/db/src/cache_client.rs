@@ -1,60 +1,82 @@
 use crosspost_core::{Error, Result};
+use serde::{Deserialize, Serialize};
 use surrealdb::engine::any::Any;
 use surrealdb::Surreal;
 
-pub struct RocksDbClient {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CacheEntry {
+    value: String,
+}
+
+pub struct CacheClient {
     db: Surreal<Any>,
 }
 
-impl RocksDbClient {
+impl CacheClient {
     pub async fn new(db: Surreal<Any>) -> Result<Self> {
         Ok(Self { db })
     }
 
-    /// Store a token in the cache
+    /// Store a value in the cache
+    pub async fn store(&self, key: &str, value: &str) -> Result<()> {
+        let entry = CacheEntry {
+            value: value.to_string(),
+        };
+        let _: Option<CacheEntry> = self
+            .db
+            .upsert(("cache", key))
+            .content(entry)
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Retrieve a value from the cache
+    pub async fn get(&self, key: &str) -> Result<Option<String>> {
+        let result: Option<CacheEntry> = self
+            .db
+            .select(("cache", key))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+        Ok(result.map(|e| e.value))
+    }
+
+    /// Delete a value from the cache
+    pub async fn delete(&self, key: &str) -> Result<()> {
+        let _: Option<CacheEntry> = self
+            .db
+            .delete(("cache", key))
+            .await
+            .map_err(|e| Error::Database(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Store a token (alias for store)
     pub async fn store_token(&self, key: &str, value: &str) -> Result<()> {
-        let cache_key = format!("cache:{}", key);
-        let _: Option<String> = self
-            .db
-            .set(&cache_key, value)
-            .await
-            .map_err(|e| Error::Database(e.to_string()))?;
-        Ok(())
+        self.store(key, value).await
     }
 
-    /// Retrieve a token from the cache
+    /// Get a token (alias for get)
     pub async fn get_token(&self, key: &str) -> Result<Option<String>> {
-        let cache_key = format!("cache:{}", key);
-        let result: Option<String> = self
-            .db
-            .select(&cache_key)
-            .await
-            .map_err(|e| Error::Database(e.to_string()))?;
-        Ok(result)
+        self.get(key).await
     }
 
-    /// Delete a token from the cache
+    /// Delete a token (alias for delete)
     pub async fn delete_token(&self, key: &str) -> Result<()> {
-        let cache_key = format!("cache:{}", key);
-        let _: Option<String> = self
-            .db
-            .delete(&cache_key)
-            .await
-            .map_err(|e| Error::Database(e.to_string()))?;
-        Ok(())
+        self.delete(key).await
     }
 
     /// Increment a rate limit counter
     pub async fn increment_rate_limit(&self, key: &str) -> Result<u64> {
         let current = self.get_rate_limit_count(key).await?;
         let new_count = current + 1;
-        self.store_token(key, &new_count.to_string()).await?;
+        self.store(key, &new_count.to_string()).await?;
         Ok(new_count)
     }
 
     /// Get current rate limit count
     pub async fn get_rate_limit_count(&self, key: &str) -> Result<u64> {
-        match self.get_token(key).await? {
+        match self.get(key).await? {
             Some(value) => {
                 let count = value
                     .parse::<u64>()
@@ -67,19 +89,17 @@ impl RocksDbClient {
 
     /// Reset rate limit counter
     pub async fn reset_rate_limit(&self, key: &str) -> Result<()> {
-        self.delete_token(key).await
+        self.delete(key).await
     }
 }
 
 #[async_trait::async_trait]
-impl crate::Database for RocksDbClient {
+impl crate::Database for CacheClient {
     async fn init(&self) -> Result<()> {
-        // No initialization needed
         Ok(())
     }
 
     async fn health_check(&self) -> Result<()> {
-        // Simple health check
         self.db
             .health()
             .await

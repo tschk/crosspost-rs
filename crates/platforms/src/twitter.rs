@@ -14,6 +14,12 @@ impl TwitterClient {
     }
 }
 
+impl Default for TwitterClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Serialize)]
 struct TwitterPostRequest {
     text: String,
@@ -52,7 +58,10 @@ impl Platform for TwitterClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!("Twitter API error: {}", error_text)));
+            return Err(Error::Platform(format!(
+                "Twitter API error: {}",
+                error_text
+            )));
         }
 
         let twitter_response: TwitterPostResponse = response

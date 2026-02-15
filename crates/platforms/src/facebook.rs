@@ -14,6 +14,12 @@ impl FacebookClient {
     }
 }
 
+impl Default for FacebookClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Serialize)]
 struct FacebookPostRequest {
     message: String,
@@ -49,7 +55,10 @@ impl Platform for FacebookClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!("Facebook API error: {}", error_text)));
+            return Err(Error::Platform(format!(
+                "Facebook API error: {}",
+                error_text
+            )));
         }
 
         let fb_response: FacebookPostResponse = response

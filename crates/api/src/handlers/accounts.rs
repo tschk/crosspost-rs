@@ -1,16 +1,13 @@
 use crate::{middleware::AppError, state::AppState};
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{extract::State, response::IntoResponse, Extension, Json};
+use crosspost_auth::Claims;
 use std::sync::Arc;
-use uuid::Uuid;
 
-/// List all connected accounts for a user
+/// List all connected accounts for the authenticated user
 pub async fn list_accounts(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, AppError> {
-    // TODO: Get user_id from authenticated session
-    let user_id = Uuid::new_v4(); // Placeholder
-
-    let accounts = state.db.list_connected_accounts_by_user(user_id).await?;
-
+    let accounts = state.db.list_connected_accounts_by_user(claims.sub).await?;
     Ok(Json(accounts))
 }

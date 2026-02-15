@@ -5,6 +5,19 @@ pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub oauth: OAuthConfig,
+    pub auth: AuthConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AuthConfig {
+    pub jwt_secret: String,
+    /// Token expiry in seconds (default: 3600 = 1 hour)
+    #[serde(default = "default_token_expiry")]
+    pub token_expiry_secs: u64,
+}
+
+fn default_token_expiry() -> u64 {
+    3600
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -44,7 +57,7 @@ pub struct PlatformOAuthConfig {
 impl AppConfig {
     pub fn from_env() -> crate::Result<Self> {
         dotenvy::dotenv().ok();
-        
+
         let config = config::Config::builder()
             .add_source(config::Environment::default().separator("__"))
             .build()

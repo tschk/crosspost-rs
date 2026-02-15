@@ -1,11 +1,14 @@
 use crate::{middleware::AppError, state::AppState};
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{extract::State, response::IntoResponse, Extension, Json};
+use crosspost_auth::Claims;
 use crosspost_core::{
     CreatePostRequest, CreatePostResponse, Error, PlatformPostResult, Post, PostStatus,
     SchedulePostRequest, ScheduledPost,
 };
 use crosspost_platforms::{
-    facebook::FacebookClient, instagram::InstagramClient, twitter::TwitterClient, Platform as PlatformClient, PostRequest,
+    facebook::FacebookClient, instagram::InstagramClient, linkedin::LinkedInClient,
+    reddit::RedditClient, slack::SlackClient, tiktok::TikTokClient, twitter::TwitterClient,
+    youtube::YouTubeClient, PlatformClient, PostRequest,
 };
 use std::sync::Arc;
 use uuid::Uuid;
@@ -14,15 +17,15 @@ use validator::Validate;
 /// Create and post content to multiple platforms
 pub async fn create_post(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
     Json(request): Json<CreatePostRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Validate request
-    request.validate()
-        .map_err(|e| Error::Validation(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e: validator::ValidationErrors| Error::Validation(e.to_string()))?;
 
-    // TODO: Get user_id and tenant_id from authenticated session
-    let user_id = Uuid::new_v4(); // Placeholder
-    let tenant_id = Uuid::new_v4(); // Placeholder
+    let user_id = claims.sub;
+    let tenant_id = claims.tenant_id;
 
     // Create post record
     let post = Post {
@@ -42,13 +45,26 @@ pub async fn create_post(
 
     for account_id in &request.account_ids {
         let account = state.db.get_connected_account(*account_id).await?;
-        
+
         let account = match account {
-            Some(acc) => acc,
+            Some(acc) => {
+                // Verify account belongs to this user's tenant
+                if acc.tenant_id != tenant_id {
+                    results.push(PlatformPostResult {
+                        account_id: *account_id,
+                        platform: crosspost_core::Platform::Twitter,
+                        status: PostStatus::Failed,
+                        platform_post_id: None,
+                        error_message: Some("Account not found".to_string()),
+                    });
+                    continue;
+                }
+                acc
+            }
             None => {
                 results.push(PlatformPostResult {
                     account_id: *account_id,
-                    platform: crosspost_core::Platform::Twitter, // Placeholder
+                    platform: crosspost_core::Platform::Twitter,
                     status: PostStatus::Failed,
                     platform_post_id: None,
                     error_message: Some("Account not found".to_string()),
@@ -57,43 +73,61 @@ pub async fn create_post(
             }
         };
 
-        // Get platform client based on account platform
-        let platform_result = match account.platform {
-            crosspost_core::Platform::Twitter => {
-                let client = TwitterClient::new();
-                let post_request = PostRequest {
-                    content: request.content.clone(),
-                    media_urls: request.media_urls.clone(),
-                };
-                client.post(&account.access_token, post_request).await
-            }
-            crosspost_core::Platform::Facebook => {
-                let client = FacebookClient::new();
-                let post_request = PostRequest {
-                    content: request.content.clone(),
-                    media_urls: request.media_urls.clone(),
-                };
-                client.post(&account.access_token, post_request).await
-            }
-            crosspost_core::Platform::Instagram => {
-                let client = InstagramClient::new();
-                let post_request = PostRequest {
-                    content: request.content.clone(),
-                    media_urls: request.media_urls.clone(),
-                };
-                client.post(&account.access_token, post_request).await
-            }
-            _ => {
-                results.push(PlatformPostResult {
-                    account_id: *account_id,
-                    platform: account.platform,
-                    status: PostStatus::Failed,
-                    platform_post_id: None,
-                    error_message: Some("Platform not yet implemented".to_string()),
-                });
-                continue;
-            }
+        let post_request = PostRequest {
+            content: request.content.clone(),
+            media_urls: request.media_urls.clone(),
         };
+
+        let platform_result: crosspost_core::Result<crosspost_platforms::PostResponse> =
+            match account.platform {
+                crosspost_core::Platform::Twitter => {
+                    let client = TwitterClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::Facebook => {
+                    let client = FacebookClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::Instagram => {
+                    let client = InstagramClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::LinkedIn => {
+                    let client = LinkedInClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::YouTube => {
+                    let client = YouTubeClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::TikTok => {
+                    let client = TikTokClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::Reddit => {
+                    let client = RedditClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::Twitch => {
+                    let client_id = state
+                        .config
+                        .oauth
+                        .twitch
+                        .as_ref()
+                        .map(|c| c.client_id.clone())
+                        .unwrap_or_default();
+                    let client = crosspost_platforms::twitch::TwitchClient::new(client_id);
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::Slack => {
+                    let client = SlackClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+                crosspost_core::Platform::Telegram => {
+                    let client = crosspost_platforms::telegram::TelegramClient::new();
+                    client.post(&account.access_token, post_request).await
+                }
+            };
 
         let result = match platform_result {
             Ok(response) => PlatformPostResult {
@@ -121,36 +155,29 @@ pub async fn create_post(
     }))
 }
 
-/// List post history for a user
+/// List post history for the authenticated user
 pub async fn list_posts(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
 ) -> Result<impl IntoResponse, AppError> {
-    // TODO: Get user_id from authenticated session
-    let user_id = Uuid::new_v4(); // Placeholder
-
-    let posts = state.db.list_posts_by_user(user_id, 50).await?;
-
+    let posts = state.db.list_posts_by_user(claims.sub, 50).await?;
     Ok(Json(posts))
 }
 
 /// Schedule a post for future publishing
 pub async fn schedule_post(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
     Json(request): Json<SchedulePostRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Validate request
-    request.validate()
-        .map_err(|e| Error::Validation(e.to_string()))?;
+    request
+        .validate()
+        .map_err(|e: validator::ValidationErrors| Error::Validation(e.to_string()))?;
 
-    // TODO: Get user_id and tenant_id from authenticated session
-    let user_id = Uuid::new_v4(); // Placeholder
-    let tenant_id = Uuid::new_v4(); // Placeholder
-
-    // Create scheduled post
     let scheduled_post = ScheduledPost {
         id: Uuid::new_v4(),
-        user_id,
-        tenant_id,
+        user_id: claims.sub,
+        tenant_id: claims.tenant_id,
         content: request.content,
         scheduled_for: request.scheduled_for,
         account_ids: request.account_ids,

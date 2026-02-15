@@ -19,8 +19,36 @@ pub struct User {
     pub tenant_id: Uuid,
     pub email: String,
     pub name: String,
+    pub password_hash: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Request to register a new user
+#[derive(Debug, Clone, Serialize, Deserialize, Validate)]
+pub struct RegisterRequest {
+    #[validate(email)]
+    pub email: String,
+    #[validate(length(min = 1, max = 200))]
+    pub name: String,
+    #[validate(length(min = 8, max = 128))]
+    pub password: String,
+    pub tenant_name: Option<String>,
+}
+
+/// Request to log in
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoginRequest {
+    pub email: String,
+    pub password: String,
+}
+
+/// Auth token response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthTokenResponse {
+    pub token: String,
+    pub user_id: Uuid,
+    pub tenant_id: Uuid,
 }
 
 /// Social media platform types

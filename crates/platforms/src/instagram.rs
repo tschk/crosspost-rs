@@ -14,6 +14,12 @@ impl InstagramClient {
     }
 }
 
+impl Default for InstagramClient {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Serialize)]
 struct InstagramPostRequest {
     caption: String,

@@ -8,6 +8,7 @@ use axum::{
 use crosspost_core::{
     ConnectedAccount, Error, OAuthAuthorizationResponse, OAuthCallbackQuery, Platform,
 };
+use oauth2::TokenResponse;
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
 
@@ -16,23 +17,10 @@ pub async fn connect_platform(
     State(state): State<Arc<AppState>>,
     Path(platform_str): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let platform = Platform::from_str(&platform_str)
-        .map_err(|e| Error::InvalidRequest(e))?;
+    let platform = Platform::from_str(&platform_str).map_err(Error::InvalidRequest)?;
 
     // Get OAuth config for platform
-    let oauth_config = match platform {
-        Platform::Twitter => state.config.oauth.twitter.as_ref(),
-        Platform::Facebook => state.config.oauth.facebook.as_ref(),
-        Platform::Instagram => state.config.oauth.instagram.as_ref(),
-        Platform::LinkedIn => state.config.oauth.linkedin.as_ref(),
-        Platform::YouTube => state.config.oauth.youtube.as_ref(),
-        Platform::TikTok => state.config.oauth.tiktok.as_ref(),
-        Platform::Reddit => state.config.oauth.reddit.as_ref(),
-        Platform::Twitch => state.config.oauth.twitch.as_ref(),
-        Platform::Slack => state.config.oauth.slack.as_ref(),
-        Platform::Telegram => state.config.oauth.telegram.as_ref(),
-    }
-    .ok_or_else(|| Error::Config(format!("{} OAuth not configured", platform)))?;
+    let oauth_config = get_platform_oauth_config(&state, platform)?;
 
     // Create OAuth client
     let oauth_client = state.oauth_handler.create_oauth_client(
@@ -63,8 +51,7 @@ pub async fn oauth_callback(
     Path(platform_str): Path<String>,
     Query(query): Query<OAuthCallbackQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let platform = Platform::from_str(&platform_str)
-        .map_err(|e| Error::InvalidRequest(e))?;
+    let platform = Platform::from_str(&platform_str).map_err(Error::InvalidRequest)?;
 
     // Verify state token
     let cache_key = format!("oauth_state:{}", query.state);
@@ -82,19 +69,7 @@ pub async fn oauth_callback(
     state.cache.delete_token(&cache_key).await?;
 
     // Get OAuth config
-    let oauth_config = match platform {
-        Platform::Twitter => state.config.oauth.twitter.as_ref(),
-        Platform::Facebook => state.config.oauth.facebook.as_ref(),
-        Platform::Instagram => state.config.oauth.instagram.as_ref(),
-        Platform::LinkedIn => state.config.oauth.linkedin.as_ref(),
-        Platform::YouTube => state.config.oauth.youtube.as_ref(),
-        Platform::TikTok => state.config.oauth.tiktok.as_ref(),
-        Platform::Reddit => state.config.oauth.reddit.as_ref(),
-        Platform::Twitch => state.config.oauth.twitch.as_ref(),
-        Platform::Slack => state.config.oauth.slack.as_ref(),
-        Platform::Telegram => state.config.oauth.telegram.as_ref(),
-    }
-    .ok_or_else(|| Error::Config(format!("{} OAuth not configured", platform)))?;
+    let oauth_config = get_platform_oauth_config(&state, platform)?;
 
     // Create OAuth client
     let oauth_client = state.oauth_handler.create_oauth_client(
@@ -113,10 +88,12 @@ pub async fn oauth_callback(
     let access_token = token_response.access_token().secret().clone();
     let refresh_token = token_response
         .refresh_token()
-        .map(|t| t.secret().clone());
-    let expires_at = token_response.expires_in().map(|duration| {
-        chrono::Utc::now() + chrono::Duration::seconds(duration.as_secs() as i64)
-    });
+        .map(|t: &oauth2::RefreshToken| t.secret().clone());
+    let expires_at = token_response
+        .expires_in()
+        .map(|duration: std::time::Duration| {
+            chrono::Utc::now() + chrono::Duration::seconds(duration.as_secs() as i64)
+        });
 
     // TODO: Get actual user_id and tenant_id from authenticated session
     let user_id = Uuid::new_v4(); // Placeholder
@@ -152,8 +129,26 @@ pub async fn disconnect_account(
     Path(account_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
     // TODO: Verify user owns this account
-    
     state.db.delete_connected_account(account_id).await?;
-
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Helper to get platform OAuth config from AppState
+fn get_platform_oauth_config(
+    state: &AppState,
+    platform: Platform,
+) -> Result<&crosspost_core::config::PlatformOAuthConfig, Error> {
+    match platform {
+        Platform::Twitter => state.config.oauth.twitter.as_ref(),
+        Platform::Facebook => state.config.oauth.facebook.as_ref(),
+        Platform::Instagram => state.config.oauth.instagram.as_ref(),
+        Platform::LinkedIn => state.config.oauth.linkedin.as_ref(),
+        Platform::YouTube => state.config.oauth.youtube.as_ref(),
+        Platform::TikTok => state.config.oauth.tiktok.as_ref(),
+        Platform::Reddit => state.config.oauth.reddit.as_ref(),
+        Platform::Twitch => state.config.oauth.twitch.as_ref(),
+        Platform::Slack => state.config.oauth.slack.as_ref(),
+        Platform::Telegram => state.config.oauth.telegram.as_ref(),
+    }
+    .ok_or_else(|| Error::Config(format!("{} OAuth not configured", platform)))
 }

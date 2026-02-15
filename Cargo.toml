@@ -5,6 +5,7 @@ members = [
     "crates/db",
     "crates/platforms",
     "crates/api",
+    "crates/crosspost",
 ]
 resolver = "2"
 

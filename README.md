@@ -1,411 +1,211 @@
-# crosspost-rs
+# crosspost
 
-🚀 **Multi-tenant SaaS platform for cross-posting content to social media** - Rust rewrite of the popular [crosspost library](https://github.com/humanwhocodes/crosspost)
+**Cross-post messages to multiple social media platforms from Rust.**
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+A Rust rewrite and expansion of the [`@humanwhocodes/crosspost`](https://github.com/humanwhocodes/crosspost) JavaScript library. Supports 16 platforms with typed credentials, concurrent posting, and per-platform error isolation.
+
+[![License](https://img.shields.io/badge/license-Polyform%20Shield%201.0-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.83%2B-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/status-alpha-yellow.svg)]()
 
 ---
 
-## ⚠️ Project Status: Alpha (Foundation Complete)
+## Quick Start
 
-This is an **active rewrite** from JavaScript to Rust. The foundation is complete (~20% of planned features), but significant work remains. See [TODO.md](TODO.md) for the complete task list and progress.
+Add to your `Cargo.toml`:
 
-**Current Capabilities:**
-- ✅ Core types and error handling
-- ✅ Database layer (SurrealDB + RocksDB)
-- ✅ Basic OAuth structure
-- ✅ API framework with Axum
-- ✅ Docker deployment setup
-- 🚧 Platform integrations (partial)
-- 📋 Rate limiting (planned)
-- 📋 Scheduling (planned)
-- 📋 Production testing (planned)
-
-**See [TODO.md](TODO.md) for detailed implementation status and roadmap.**
-
----
-
-## 🎯 Overview
-
-Crosspost-RS is a complete rewrite and expansion of the original JavaScript crosspost library, transforming it from a simple utility into a production-ready multi-tenant SaaS platform. Built for marketing agencies managing multiple clients, each with multiple social media accounts.
-
-### Key Differences from JavaScript Version
-
-| Feature | JavaScript Library | Rust SaaS Platform |
-|---------|-------------------|-------------------|
-| Architecture | Single-user library | Multi-tenant SaaS |
-| Auth | API keys/tokens | OAuth2 flows |
-| Storage | None | SurrealDB + RocksDB |
-| Accounts | One per platform | Multiple per platform per user |
-| Deployment | NPM package | Docker containers |
-| API | Client library | REST API |
-| Scheduling | None | Built-in scheduler |
-| Rate Limiting | Manual | Automatic per-platform |
-
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                     Axum API Server                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │   OAuth      │  │   Posting    │  │  Scheduling  │ │
-│  │  Endpoints   │  │  Endpoints   │  │  Endpoints   │ │
-│  └──────────────┘  └──────────────┘  └──────────────┘ │
-└─────────────────────────────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-  ┌─────▼─────┐      ┌──────▼──────┐     ┌─────▼─────┐
-  │ SurrealDB │      │  RocksDB    │     │ Platform  │
-  │           │      │             │     │  Clients  │
-  │ • Users   │      │ • Tokens    │     │           │
-  │ • Tenants │      │ • Rate      │     │ Twitter   │
-  │ • Accounts│      │   Limits    │     │ Facebook  │
-  │ • Posts   │      │             │     │ Instagram │
-  └───────────┘      └─────────────┘     │ LinkedIn  │
-                                          │ YouTube   │
-                                          │ TikTok    │
-                                          │ Reddit    │
-                                          │ Twitch    │
-                                          │ Slack     │
-                                          │ Telegram  │
-                                          └───────────┘
+```toml
+[dependencies]
+crosspost = { git = "https://github.com/GraftAI-com/crosspost-rs.git" }
+tokio = { version = "1", features = ["full"] }
 ```
 
-### Crate Structure
-
-```
-crosspost-rs/
-├── crates/
-│   ├── core/           # Shared types, errors, config (267 lines)
-│   ├── auth/           # OAuth2, token management (250 lines)
-│   ├── db/             # SurrealDB + RocksDB clients (370 lines)
-│   ├── platforms/      # Platform API clients (290 lines)
-│   └── api/            # Axum server & endpoints (560 lines)
-├── migrations/         # Database migrations (planned)
-├── Dockerfile          # Production container
-├── docker-compose.yml  # Local development
-└── TODO.md            # Complete task list
-```
-
----
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Rust 1.83 or later
-- Docker & Docker Compose (for easy setup)
-- Or: SurrealDB and RocksDB locally
-
-### Option 1: Docker (Recommended)
-
-```bash
-# Clone the repository
-git clone https://github.com/GraftAI-com/crosspost-rs.git
-cd crosspost-rs
-
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your OAuth credentials
-# (See "Platform Setup" section below)
-
-# Start all services
-docker-compose up -d
-
-# Check logs
-docker-compose logs -f crosspost-api
-```
-
-API will be available at `http://localhost:3000`
-
-### Option 2: Local Development
-
-```bash
-# Install Rust
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install SurrealDB
-curl -sSf https://install.surrealdb.com | sh
-
-# Clone and build
-git clone https://github.com/GraftAI-com/crosspost-rs.git
-cd crosspost-rs
-cargo build --release
-
-# Start SurrealDB
-surreal start --log trace --user root --pass root memory
-
-# Set environment variables
-export DATABASE__SURREALDB_URL=ws://localhost:8000
-export DATABASE__ROCKSDB_PATH=./data/rocksdb
-export SERVER__HOST=0.0.0.0
-export SERVER__PORT=3000
-
-# Run the server
-cargo run --bin crosspost-server
-```
-
----
-
-## 📚 API Documentation
-
-### Health Check
-
-```bash
-curl http://localhost:3000/health
-```
-
-### OAuth Flow
-
-1. **Initiate Connection**
-```bash
-curl -X POST http://localhost:3000/auth/twitter/connect \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "X-Tenant-ID: YOUR_TENANT_ID"
-
-# Returns:
-{
-  "authorization_url": "https://twitter.com/oauth/authorize?...",
-  "state": "random-csrf-token"
-}
-```
-
-2. **User authorizes on platform** (redirected to authorization_url)
-
-3. **Callback handled automatically** at `/auth/{platform}/callback`
-
-4. **Account is connected** and stored in database
-
-### List Connected Accounts
-
-```bash
-curl http://localhost:3000/accounts \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "X-Tenant-ID: YOUR_TENANT_ID"
-```
-
-### Create Cross-Post
-
-```bash
-curl -X POST http://localhost:3000/post \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "X-Tenant-ID: YOUR_TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "Hello from Crosspost-RS! 🚀",
-    "platform_accounts": [
-      "twitter-account-uuid",
-      "facebook-account-uuid"
-    ],
-    "media": []
-  }'
-
-# Returns:
-{
-  "post_id": "uuid",
-  "results": [
-    {
-      "platform": "twitter",
-      "success": true,
-      "platform_post_id": "1234567890",
-      "url": "https://twitter.com/user/status/1234567890"
-    },
-    {
-      "platform": "facebook",
-      "success": true,
-      "platform_post_id": "98765_43210",
-      "url": "https://facebook.com/98765/posts/43210"
-    }
-  ]
-}
-```
-
-### Schedule a Post
-
-```bash
-curl -X POST http://localhost:3000/schedule \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
-  -H "X-Tenant-ID: YOUR_TENANT_ID" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "content": "Scheduled post for tomorrow",
-    "platform_accounts": ["twitter-account-uuid"],
-    "scheduled_for": "2026-02-15T09:00:00Z"
-  }'
-```
-
----
-
-## 🔧 Platform Setup
-
-Each platform requires OAuth2 credentials. Follow these guides:
-
-### Twitter/X
-1. Go to [Twitter Developer Portal](https://developer.twitter.com/en/portal/dashboard)
-2. Create a new app
-3. Enable OAuth 2.0
-4. Set redirect URI: `http://localhost:3000/auth/twitter/callback`
-5. Add to `.env`:
-```env
-TWITTER_CLIENT_ID=your_client_id
-TWITTER_CLIENT_SECRET=your_client_secret
-```
-
-### Facebook
-1. Go to [Facebook Developers](https://developers.facebook.com/)
-2. Create an app
-3. Add "Facebook Login" product
-4. Set Valid OAuth Redirect URIs: `http://localhost:3000/auth/facebook/callback`
-5. Add to `.env`:
-```env
-FACEBOOK_APP_ID=your_app_id
-FACEBOOK_APP_SECRET=your_app_secret
-```
-
-### Instagram
-(Uses Facebook OAuth - requires business account)
-```env
-INSTAGRAM_APP_ID=your_facebook_app_id
-INSTAGRAM_APP_SECRET=your_facebook_app_secret
-```
-
-### LinkedIn
-1. Go to [LinkedIn Developers](https://www.linkedin.com/developers/)
-2. Create an app
-3. Request "Share on LinkedIn" product
-4. Add redirect URL: `http://localhost:3000/auth/linkedin/callback`
-```env
-LINKEDIN_CLIENT_ID=your_client_id
-LINKEDIN_CLIENT_SECRET=your_client_secret
-```
-
-*See [SETUP.md](SETUP.md) for complete platform setup instructions*
-
----
-
-## 🔐 Multi-Tenant Architecture
-
-### Tenant Isolation
-
-Every request must include:
-- `Authorization: Bearer <jwt_token>` - Contains user ID and tenant ID
-- `X-Tenant-ID: <tenant_id>` - Verified against JWT
-
-### Database Scoping
-
-All queries are automatically scoped by tenant ID:
 ```rust
-// Automatic tenant scoping
-let accounts = db.list_connected_accounts_by_user(user_id).await?;
-// Only returns accounts for the user's tenant
+use crosspost::{Client, BlueskyStrategy, BlueskyCredentials, MastodonStrategy, MastodonCredentials, PostResult};
+
+#[tokio::main]
+async fn main() -> crosspost::Result<()> {
+    let client = Client::new(vec![
+        Box::new(BlueskyStrategy::new(BlueskyCredentials {
+            identifier: "user.bsky.social".into(),
+            password: "app-password".into(),
+            host: None,
+        })?),
+        Box::new(MastodonStrategy::new(MastodonCredentials {
+            access_token: "your-token".into(),
+            host: "mastodon.social".into(),
+        })?),
+    ]);
+
+    let results = client.post("Hello from Rust!", None).await;
+
+    for result in &results {
+        match result {
+            PostResult::Success { name, url, .. } => {
+                println!("Posted to {}: {}", name, url.as_deref().unwrap_or("ok"));
+            }
+            PostResult::Failure { name, reason } => {
+                println!("Failed on {}: {}", name, reason);
+            }
+        }
+    }
+
+    Ok(())
+}
 ```
 
-### Security Features
+### Load credentials from environment
 
-- JWT-based authentication
-- Tenant-level data isolation
-- Per-user rate limiting
-- OAuth token encryption at rest
-- Audit logging (planned)
+Each strategy has a `from_env()` constructor that reads platform-specific environment variables:
+
+```rust
+use crosspost::{Client, BlueskyStrategy, TwitterStrategy};
+
+let client = Client::new(vec![
+    Box::new(BlueskyStrategy::from_env()?),
+    Box::new(TwitterStrategy::from_env()?),
+]);
+```
+
+Set `CROSSPOST_DOTENV=1` to auto-load a `.env` file, or `CROSSPOST_DOTENV=/path/to/.env` for a custom path.
+
+### Post to specific platforms
+
+```rust
+use crosspost::PostToEntry;
+
+let results = client.post_to(&[
+    PostToEntry {
+        strategy_id: "bluesky".into(),
+        message: "Short post for Bluesky".into(),
+        images: None,
+    },
+    PostToEntry {
+        strategy_id: "mastodon".into(),
+        message: "Longer post with more detail for Mastodon...".into(),
+        images: None,
+    },
+]).await;
+```
 
 ---
 
-## 📊 Supported Platforms
+## Supported Platforms (16)
 
-| Platform | OAuth | Post Text | Post Images | Status |
-|----------|-------|-----------|-------------|--------|
-| Twitter  | ✅    | ✅        | 📋         | 🚧 In Progress |
-| Facebook | ✅    | ✅        | 📋         | 🚧 In Progress |
-| Instagram| ✅    | ✅        | 📋         | 🚧 In Progress |
-| LinkedIn | 📋   | 📋        | 📋         | 📋 Planned |
-| YouTube  | 📋   | 📋        | 📋         | 📋 Planned |
-| TikTok   | 📋   | 📋        | 📋         | 📋 Planned |
-| Reddit   | 📋   | 📋        | 📋         | 📋 Planned |
-| Twitch   | 📋   | 📋        | 📋         | 📋 Planned |
-| Slack    | 📋   | 📋        | 📋         | 📋 Planned |
-| Telegram | 📋   | 📋        | 📋         | 📋 Planned |
-
-Legend: ✅ Complete | 🚧 In Progress | 📋 Planned
+| Platform | Strategy | Auth | Images | Max Length |
+|----------|----------|------|--------|------------|
+| Twitter/X | `TwitterStrategy` | OAuth2 bearer | Yes (upload) | 280 (URLs=23) |
+| Bluesky | `BlueskyStrategy` | App password | Yes (blob) | 300 (URLs=27) |
+| Mastodon | `MastodonStrategy` | OAuth2 bearer | Yes (media) | 500 |
+| LinkedIn | `LinkedInStrategy` | OAuth2 bearer | Yes (3-step) | 3,000 |
+| Facebook | `FacebookStrategy` | OAuth2 bearer | Yes (multi) | 63,206 |
+| Instagram | `InstagramStrategy` | OAuth2 bearer | Yes | 2,200 |
+| Discord Bot | `DiscordStrategy` | Bot token | Yes (multipart) | 2,000 |
+| Discord Webhook | `DiscordWebhookStrategy` | Webhook URL | Yes (multipart) | 2,000 |
+| Telegram | `TelegramStrategy` | Bot API | Yes (sendPhoto) | 4,096 |
+| Slack | `SlackStrategy` | Bot token | Yes (3-step) | 40,000 |
+| Dev.to | `DevtoStrategy` | API key | Yes (base64 md) | Unlimited |
+| Nostr | `NostrStrategy` | Private key | No | 280 |
+| YouTube | `YouTubeStrategy` | OAuth2 bearer | No | 5,000 |
+| TikTok | `TikTokStrategy` | OAuth2 bearer | No | 2,200 |
+| Reddit | `RedditStrategy` | OAuth2 bearer | No | 40,000 |
+| Twitch | `TwitchStrategy` | OAuth2 bearer | No | 500 |
 
 ---
 
-## 🧪 Testing
+## Environment Variables
+
+Each strategy reads specific environment variables via `from_env()`:
+
+| Platform | Variables |
+|----------|-----------|
+| Twitter | `TWITTER_ACCESS_TOKEN` (or `TWITTER_ACCESS_TOKEN_KEY`) |
+| Bluesky | `BLUESKY_IDENTIFIER`, `BLUESKY_PASSWORD`, `BLUESKY_HOST` (optional) |
+| Mastodon | `MASTODON_ACCESS_TOKEN`, `MASTODON_HOST` (optional, defaults to mastodon.social) |
+| LinkedIn | `LINKEDIN_ACCESS_TOKEN` |
+| Facebook | `FACEBOOK_ACCESS_TOKEN`, `FACEBOOK_PAGE_ID` (optional) |
+| Instagram | `INSTAGRAM_ACCESS_TOKEN` |
+| Discord Bot | `DISCORD_BOT_TOKEN`, `DISCORD_CHANNEL_ID` |
+| Discord Webhook | `DISCORD_WEBHOOK_URL` |
+| Telegram | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
+| Slack | `SLACK_TOKEN`, `SLACK_CHANNEL` (optional, defaults to #general) |
+| Dev.to | `DEVTO_API_KEY` |
+| Nostr | `NOSTR_PRIVATE_KEY`, `NOSTR_RELAYS` (comma-separated) |
+| YouTube | `YOUTUBE_ACCESS_TOKEN` |
+| TikTok | `TIKTOK_ACCESS_TOKEN` |
+| Reddit | `REDDIT_ACCESS_TOKEN`, `REDDIT_SUBREDDIT` (optional) |
+| Twitch | `TWITCH_ACCESS_TOKEN`, `TWITCH_CLIENT_ID` |
+
+---
+
+## Image Support
+
+Attach images using `PostOptions`:
+
+```rust
+use crosspost::{PostOptions, ImageEmbed};
+
+let options = PostOptions {
+    images: Some(vec![ImageEmbed {
+        data: std::fs::read("photo.jpg")?,
+        alt: Some("A photo".into()),
+        mime_type: Some("image/jpeg".into()),
+    }]),
+};
+
+let results = client.post("Check out this photo!", Some(&options)).await;
+```
+
+- Max 4 images per post
+- MIME type auto-detected if not provided
+- Supported: JPEG, PNG, GIF
+- Image compression utilities available in `crosspost::util::images`
+
+---
+
+## Architecture
+
+The library uses the **Strategy pattern**. Each platform is a `Strategy` implementation with credentials baked in at construction time. The `Client` orchestrates posting to multiple strategies concurrently.
+
+```
+Client::post("message")
+    ├── TwitterStrategy::post()   → PostResult::Success / Failure
+    ├── BlueskyStrategy::post()   → PostResult::Success / Failure
+    └── MastodonStrategy::post()  → PostResult::Success / Failure
+```
+
+One strategy failing does not affect others. Results are collected as `Vec<PostResult>`.
+
+---
+
+## Development
 
 ```bash
-# Run all tests
-cargo test
-
-# Run specific crate tests
-cargo test -p crosspost-core
-cargo test -p crosspost-platforms
-
-# Run with output
-cargo test -- --nocapture
-
-# Run integration tests
-cargo test --test '*'
+cargo check                                    # Check compilation
+cargo test --workspace                         # Run all 86 tests
+cargo clippy --workspace -- -D warnings        # Lint
+cargo fmt --all -- --check                     # Format check
 ```
 
-⚠️ **Note**: Test suite is currently being developed. See [TODO.md](TODO.md) for testing roadmap.
+### Workspace Structure
+
+```
+crates/
+├── crosspost/     # Main library crate (Strategy pattern, Client, 16 platforms)
+├── core/          # Shared types, errors, config (used by server crates)
+├── auth/          # JWT, OAuth2, password hashing (server)
+├── db/            # SurrealDB client + cache (server)
+├── platforms/     # Platform trait (server, older pattern)
+└── api/           # Axum HTTP server (server)
+```
+
+The `crosspost` crate is the standalone library. The other crates (`core`, `auth`, `db`, `platforms`, `api`) are for an optional SaaS server layer.
 
 ---
 
-## 🚦 Rate Limiting
+## License
 
-Each platform has different rate limits. Crosspost-RS automatically manages these:
+Polyform Shield 1.0.0 - See [LICENSE](LICENSE) for details.
 
-| Platform | Limit | Window |
-|----------|-------|--------|
-| Twitter  | 300 posts | 3 hours |
-| Facebook | Varies | Per page |
-| Instagram| 25 posts | 24 hours |
-| LinkedIn | 150 posts | 24 hours |
-
-Rate limits are tracked in RocksDB with sliding window algorithm.
-
----
-
-## 📈 Monitoring
-
-### Health Endpoints
-
-```bash
-# Basic health check
-curl http://localhost:3000/health
-
-# Database health (planned)
-curl http://localhost:3000/health/db
-
-# Metrics (planned, Prometheus format)
-curl http://localhost:3000/metrics
-```
-
-### Logging
-
-Structured logging with tracing:
-
-```bash
-# Set log level
-export RUST_LOG=debug
-
-# Or per-module
-export RUST_LOG=crosspost_api=debug,crosspost_platforms=trace
-```
-
-## 📄 License
-
-Polyform Shield 1.0.0 - See [LICENSE](LICENSE) for details
-
----
-
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Original [crosspost library](https://github.com/humanwhocodes/crosspost) by [Nicholas C. Zakas](https://humanwhocodes.com)
-- Inspired by the need for enterprise-grade social media management tools
-- Built with amazing Rust ecosystem crates: Axum, SurrealDB, Tokio, and many more

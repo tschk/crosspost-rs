@@ -4,6 +4,10 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{BlueskyCredentials, PostOptions};
 use serde::{Deserialize, Serialize};
 
+/// Strategy for posting to Bluesky via the AT Protocol.
+///
+/// Supports rich text facets (URLs, @mentions, #hashtags), image uploads with
+/// aspect ratios, and configurable PDS host. URLs > 27 chars count as 27 for length.
 pub struct BlueskyStrategy {
     client: reqwest::Client,
     credentials: BlueskyCredentials,
@@ -11,6 +15,7 @@ pub struct BlueskyStrategy {
 }
 
 impl BlueskyStrategy {
+    /// Create a new Bluesky strategy with the given credentials.
     pub fn new(credentials: BlueskyCredentials) -> Result<Self> {
         if credentials.identifier.is_empty() {
             return Err(Error::Validation(
@@ -33,6 +38,9 @@ impl BlueskyStrategy {
         })
     }
 
+    /// Create a Bluesky strategy from environment variables.
+    ///
+    /// Reads `BLUESKY_IDENTIFIER`, `BLUESKY_PASSWORD`, and optionally `BLUESKY_HOST`.
     pub fn from_env() -> Result<Self> {
         Self::new(BlueskyCredentials {
             identifier: required_env("BLUESKY_IDENTIFIER")?,

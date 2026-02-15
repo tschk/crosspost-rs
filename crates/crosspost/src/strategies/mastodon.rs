@@ -4,12 +4,16 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{MastodonCredentials, PostOptions};
 use serde::Deserialize;
 
+/// Strategy for posting to Mastodon instances.
+///
+/// Supports configurable instance host and media uploads.
 pub struct MastodonStrategy {
     client: reqwest::Client,
     credentials: MastodonCredentials,
 }
 
 impl MastodonStrategy {
+    /// Create a new Mastodon strategy with the given credentials.
     pub fn new(credentials: MastodonCredentials) -> Result<Self> {
         if credentials.access_token.is_empty() {
             return Err(Error::Validation(
@@ -25,6 +29,9 @@ impl MastodonStrategy {
         })
     }
 
+    /// Create a Mastodon strategy from environment variables.
+    ///
+    /// Reads `MASTODON_ACCESS_TOKEN` and optionally `MASTODON_HOST` (defaults to "mastodon.social").
     pub fn from_env() -> Result<Self> {
         Self::new(MastodonCredentials {
             access_token: required_env("MASTODON_ACCESS_TOKEN")?,

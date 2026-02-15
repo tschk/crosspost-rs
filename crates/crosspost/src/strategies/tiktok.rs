@@ -4,6 +4,7 @@ use crate::strategy::{PostResponse, Strategy};
 use crate::types::{PostOptions, TikTokCredentials};
 use serde::Deserialize;
 
+/// Strategy for posting to TikTok via the Content Posting API.
 pub struct TikTokStrategy {
     client: reqwest::Client,
     credentials: TikTokCredentials,

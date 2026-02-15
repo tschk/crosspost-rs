@@ -1,3 +1,7 @@
+//! Platform-specific strategy implementations.
+//!
+//! Each module contains a strategy struct that implements the [`Strategy`](crate::Strategy) trait.
+
 pub mod bluesky;
 pub mod devto;
 pub mod discord;

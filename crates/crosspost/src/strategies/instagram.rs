@@ -4,6 +4,9 @@ use crate::strategy::{PostResponse, Strategy};
 use crate::types::{InstagramCredentials, PostOptions};
 use serde::Deserialize;
 
+/// Strategy for posting to Instagram via Graph API.
+///
+/// Requires a business or creator account.
 pub struct InstagramStrategy {
     client: reqwest::Client,
     credentials: InstagramCredentials,

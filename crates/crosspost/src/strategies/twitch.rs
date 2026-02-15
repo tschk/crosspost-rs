@@ -4,6 +4,7 @@ use crate::strategy::{PostResponse, Strategy};
 use crate::types::{PostOptions, TwitchCredentials};
 use serde::Deserialize;
 
+/// Strategy for posting chat announcements on Twitch.
 pub struct TwitchStrategy {
     client: reqwest::Client,
     credentials: TwitchCredentials,

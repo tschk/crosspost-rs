@@ -4,6 +4,9 @@ use crate::strategy::{PostResponse, Strategy};
 use crate::types::{PostOptions, RedditCredentials};
 use serde::Deserialize;
 
+/// Strategy for posting to Reddit via the Submission API.
+///
+/// Posts to a subreddit if specified, otherwise to the user's profile.
 pub struct RedditStrategy {
     client: reqwest::Client,
     credentials: RedditCredentials,

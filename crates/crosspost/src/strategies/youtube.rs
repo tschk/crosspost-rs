@@ -4,6 +4,7 @@ use crate::strategy::{PostResponse, Strategy};
 use crate::types::{PostOptions, YouTubeCredentials};
 use serde::Deserialize;
 
+/// Strategy for posting to YouTube community posts via Data API.
 pub struct YouTubeStrategy {
     client: reqwest::Client,
     credentials: YouTubeCredentials,

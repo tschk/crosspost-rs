@@ -4,6 +4,9 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{PostOptions, SlackCredentials};
 use serde::Deserialize;
 
+/// Strategy for posting to Slack channels via Bot API.
+///
+/// Supports file uploads via 3-step process. Channel defaults to "#general".
 pub struct SlackStrategy {
     client: reqwest::Client,
     credentials: SlackCredentials,

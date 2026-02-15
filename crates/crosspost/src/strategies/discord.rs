@@ -4,6 +4,9 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{DiscordCredentials, PostOptions};
 use serde::Deserialize;
 
+/// Strategy for posting to Discord channels via bot token.
+///
+/// Supports multipart image uploads.
 pub struct DiscordStrategy {
     client: reqwest::Client,
     credentials: DiscordCredentials,

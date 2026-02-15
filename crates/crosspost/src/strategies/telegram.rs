@@ -4,6 +4,9 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{PostOptions, TelegramCredentials};
 use serde::Deserialize;
 
+/// Strategy for posting to Telegram via Bot API.
+///
+/// Supports text messages and photo uploads.
 pub struct TelegramStrategy {
     client: reqwest::Client,
     credentials: TelegramCredentials,

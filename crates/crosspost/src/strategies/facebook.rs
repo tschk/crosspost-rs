@@ -4,6 +4,9 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{FacebookCredentials, PostOptions};
 use serde::Deserialize;
 
+/// Strategy for posting to Facebook Pages via Graph API.
+///
+/// Supports single and multi-image posts.
 pub struct FacebookStrategy {
     client: reqwest::Client,
     credentials: FacebookCredentials,

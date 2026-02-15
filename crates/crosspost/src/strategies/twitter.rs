@@ -5,12 +5,16 @@ use crate::types::{PostOptions, TwitterCredentials};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 
+/// Strategy for posting to Twitter/X via the v2 API.
+///
+/// Uses OAuth2 bearer token authentication. URLs in messages are counted as 23 characters.
 pub struct TwitterStrategy {
     client: reqwest::Client,
     credentials: TwitterCredentials,
 }
 
 impl TwitterStrategy {
+    /// Create a new Twitter strategy with the given credentials.
     pub fn new(credentials: TwitterCredentials) -> Result<Self> {
         if credentials.access_token.is_empty() {
             return Err(Error::Validation(
@@ -23,6 +27,9 @@ impl TwitterStrategy {
         })
     }
 
+    /// Create a Twitter strategy from environment variables.
+    ///
+    /// Reads `TWITTER_ACCESS_TOKEN` (or `TWITTER_ACCESS_TOKEN_KEY`).
     pub fn from_env() -> Result<Self> {
         Self::new(TwitterCredentials {
             access_token: optional_env("TWITTER_ACCESS_TOKEN")

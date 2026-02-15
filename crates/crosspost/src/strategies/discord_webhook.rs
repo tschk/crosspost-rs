@@ -4,6 +4,9 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{DiscordWebhookCredentials, PostOptions};
 use serde::Deserialize;
 
+/// Strategy for posting to Discord via webhook URL.
+///
+/// Supports multipart image uploads. No bot token required.
 pub struct DiscordWebhookStrategy {
     client: reqwest::Client,
     credentials: DiscordWebhookCredentials,

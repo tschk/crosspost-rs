@@ -25,6 +25,21 @@ pub struct Client {
     strategies: Vec<Box<dyn Strategy>>,
 }
 
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field(
+                "strategies",
+                &self
+                    .strategies
+                    .iter()
+                    .map(|s| s.id())
+                    .collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
 impl Client {
     /// Create a new client with the given strategies.
     pub fn new(strategies: Vec<Box<dyn Strategy>>) -> Self {

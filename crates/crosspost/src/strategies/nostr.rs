@@ -7,6 +7,10 @@ use secp256k1::{Keypair, Message, Secp256k1, SecretKey, XOnlyPublicKey};
 use sha2::{Digest, Sha256};
 use tokio_tungstenite::tungstenite;
 
+/// Strategy for publishing to the Nostr protocol.
+///
+/// Signs events with secp256k1 and publishes to one or more relays via WebSocket.
+/// Supports hex and bech32 (nsec1) private key formats.
 pub struct NostrStrategy {
     secret_key: SecretKey,
     relays: Vec<String>,

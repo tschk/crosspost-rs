@@ -5,6 +5,10 @@ use crate::types::{DevtoCredentials, PostOptions};
 use base64::Engine;
 use serde::Deserialize;
 
+/// Strategy for publishing articles to Dev.to.
+///
+/// First line of the message becomes the title, rest becomes the body.
+/// Images are embedded as base64 data URIs in markdown.
 pub struct DevtoStrategy {
     client: reqwest::Client,
     credentials: DevtoCredentials,

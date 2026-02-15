@@ -1,3 +1,5 @@
+//! Image processing utilities: compression, MIME detection, dimension reading, and validation.
+
 use crate::error::{Error, Result};
 use crate::types::ImageEmbed;
 use image::ImageReader;

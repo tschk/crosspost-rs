@@ -4,6 +4,9 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{LinkedInCredentials, PostOptions};
 use serde::{Deserialize, Serialize};
 
+/// Strategy for posting to LinkedIn via the Share API.
+///
+/// Supports image uploads via 3-step register/upload/post flow.
 pub struct LinkedInStrategy {
     client: reqwest::Client,
     credentials: LinkedInCredentials,

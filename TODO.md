@@ -1,157 +1,149 @@
 # Crosspost-RS TODO
 
 **Last updated:** 2026-02-15
-**Status:** Foundation complete, compilation broken, ~35% implemented
-
----
-
-## Blocking: Fix Compilation
-
-- [ ] **Fix `crates/db/src/rocksdb_client.rs`** - 10 type errors from SurrealDB API misuse
-  - `db.set()` returns `()`, not `Option<String>`
-  - `db.select()` returns `Vec<_>`, not `Option<String>`
-  - `db.delete()` returns `Vec<_>`, not `Option<String>`
-  - Options: fix the type annotations, or replace with actual RocksDB for caching
+**Status:** Compiles clean, 25 tests passing, ~65% complete
 
 ---
 
 ## Done
 
 - [x] Cargo workspace with 5 crates (core, auth, db, platforms, api)
-- [x] Core domain types: Tenant, User, ConnectedAccount, Post, PlatformPost, ScheduledPost, PostStatus
+- [x] Core domain types with serde, validator, Display/FromStr
 - [x] Error types with HTTP status code mapping (12 variants)
-- [x] Platform enum with 10 variants + Display/FromStr/as_str
-- [x] Request/response types with validator derives
+- [x] Platform enum with 10 variants
 - [x] Environment-based configuration
 - [x] SurrealDB client with CRUD operations
-- [x] OAuth handler with URLs and scopes for all 10 platforms
+- [x] Cache client (SurrealDB-based)
+- [x] OAuth handler with URLs/scopes for all 10 platforms
 - [x] OAuth code exchange flow
-- [x] Token manager structure
+- [x] OAuth state/CSRF via cache (encodes user_id + tenant_id)
+- [x] Token manager with refresh support
+- [x] JWT authentication (HS256) with Argon2 password hashing
+- [x] User registration and login endpoints
+- [x] Auth middleware with Claims extraction
+- [x] All 10 platform clients: Twitter, Facebook, Instagram, LinkedIn, YouTube, TikTok, Reddit, Twitch, Slack, Telegram
 - [x] Platform trait (post, validate_token, platform_name)
-- [x] Twitter client: posting via API v2, token validation
-- [x] Facebook client: posting via Graph API v18.0, token validation
-- [x] Instagram client: posting via Graph API, token validation
-- [x] Axum server with tracing
-- [x] Route tree: health, auth, accounts, post, schedule
-- [x] Tenant isolation middleware (header extraction)
-- [x] AppError with status code mapping
-- [x] OAuth connect/callback handlers
 - [x] Post creation handler with multi-platform dispatch
-- [x] Dockerfile with multi-stage build
-- [x] docker-compose.yml with SurrealDB
-- [x] .env.example with all config vars
+- [x] Account ownership checks on disconnect and post
+- [x] Token refresh before platform API calls
+- [x] Rate limiting (global per-endpoint: auth 20/min, write 5/sec, read 30/sec)
+- [x] CORS middleware (needs restriction from Any)
+- [x] Prelude modules on all library crates
+- [x] 25 unit tests (core types, errors, JWT, password, rate limiter)
+- [x] CI pipeline (cargo check, clippy, fmt, test)
+- [x] Dockerfile + docker-compose.yml
+- [x] JS artifacts cleaned up
+
+---
+
+## Critical Priority
+
+### Fix Bugs
+- [ ] Fix Telegram delimiter inconsistency (`:` in post vs `|` in validate)
+- [ ] Fix hardcoded `Platform::Twitter` in error responses (posts.rs:55)
+- [ ] Fetch real platform account info after OAuth (not placeholder IDs)
+
+### Security
+- [ ] Restrict CORS to configured origins (not `Any`)
+- [ ] Per-user rate limiting (keyed by user_id from JWT)
+- [ ] Sanitize error messages sent to clients (log full errors server-side)
+- [ ] Validate JWT secret length >= 32 bytes in config
+
+### Data Integrity
+- [ ] Persist PlatformPost records to DB after successful posts
+- [ ] Add unique index on user email in SurrealDB
 
 ---
 
 ## High Priority
 
-### Authentication (no user identity system exists)
-- [ ] JWT token generation and signing (RS256 or HS256)
-- [ ] JWT validation middleware for Axum
-- [ ] User registration endpoint
-- [ ] Login/logout endpoints
-- [ ] Password hashing with Argon2 (dependency already present)
-- [ ] Tenant context extraction from JWT (replace X-Tenant-ID header)
-- [ ] Database query scoping by tenant_id
+### Feature Parity with Original JS Library
+The original `@humanwhocodes/crosspost` supports features we're missing:
 
-### Fix and Wire Up Existing Dependencies
-- [ ] CORS configuration (tower-http cors feature is present but unused)
-- [ ] Rate limiting middleware (governor is in deps but unused)
-- [ ] Request body size limits
+- [ ] **Media/Image upload** - Up to 4 images per post with alt text
+  - Platform-specific upload flows (Twitter media API, Bluesky blob upload, Mastodon media endpoint, etc.)
+  - MIME type detection and validation
+  - Image dimension detection (for Bluesky aspect ratios)
+- [ ] **Bluesky platform** - Full AT Protocol support with facet detection (links, mentions, hashtags)
+- [ ] **Mastodon platform** - With media upload support
+- [ ] **Discord platform** - Bot-based channel posting
+- [ ] **Discord Webhook platform** - Webhook-based posting
+- [ ] **Dev.to platform** - Article publishing
+- [ ] **Nostr platform** - Decentralized posting via relays
+- [ ] **Slack platform** - With file upload support (our Slack is hardcoded to #general)
+- [ ] **Message length calculation** - Per-platform character counting algorithms
+- [ ] **Post URL extraction** - Return URL of posted content from each platform
+- [ ] **AbortSignal support** - Cancellable post operations
+- [ ] **Strategy pattern** - Pluggable client-side posting (original is a library, not just SaaS)
 
-### Remaining Platform Clients (7 of 10)
-Each needs: post(), validate_token(), platform_name()
-- [ ] LinkedIn - Organization/member posting via REST API
-- [ ] YouTube - Community posts / video uploads
-- [ ] TikTok - Video publishing API
-- [ ] Reddit - Submission API
-- [ ] Twitch - Chat announcements
-- [ ] Slack - Channel posting via Web API
-- [ ] Telegram - Bot API (not OAuth - already handled correctly in auth crate)
+### Library Mode
+The original crosspost is a **library** you import and use directly. Our Rust version is only a SaaS API server. To match:
+- [ ] Make `crosspost-platforms` usable standalone (already partially done via prelude)
+- [ ] `Client` struct that accepts strategies and calls `post()` on all of them
+- [ ] CLI binary for command-line posting
+- [ ] MCP server mode (original supports this)
 
-### CI/CD
-- [ ] GitHub Actions workflow: `cargo check`, `cargo clippy`, `cargo test`
-- [ ] Automated build on PR
-- [ ] Dependency audit (`cargo audit`)
+### Background Jobs
+- [ ] Scheduled post processor (tokio interval or cron)
+- [ ] Token refresh scheduler
+- [ ] Failed post retry queue
+
+### Testing
+- [ ] Integration tests for API handlers (mock HTTP)
+- [ ] Platform client tests with mock responses
+- [ ] OAuth flow tests
+- [ ] Database operation tests
+- [ ] Test error paths, not just happy paths
 
 ---
 
 ## Medium Priority
 
-### Testing
-- [ ] Unit tests for core types (Platform enum, error status codes)
-- [ ] Unit tests for OAuth handler (URL generation, scope mapping)
-- [ ] Unit tests for platform clients (mock HTTP responses)
-- [ ] Integration tests for API handlers
-- [ ] Integration tests for database operations
+### API Completeness
+- [ ] Schedule management (list, update, cancel scheduled posts)
+- [ ] Post history with pagination (currently hardcoded LIMIT 50)
+- [ ] Return 201 Created for POST endpoints (REST compliance)
+- [ ] Request body size limits
+- [ ] Graceful shutdown
+
+### Database
+- [ ] Add TTL to cache entries (OAuth state, rate limits)
+- [ ] Cascade delete for disconnected accounts
+- [ ] Index definitions for common queries
+- [ ] Transaction support for multi-platform post creation
+- [ ] Migration system
 
 ### OAuth Hardening
 - [ ] PKCE support (required by Twitter, recommended everywhere)
-- [ ] State/CSRF validation on callback (state is generated but not verified)
 - [ ] Token encryption at rest
-- [ ] Token refresh background job
+- [ ] Configurable Slack channel (not hardcoded #general)
+- [ ] Cache LinkedIn author URN in ConnectedAccount
 
-### Database
-- [ ] Fix or replace rocksdb_client.rs (use actual RocksDB or fix SurrealDB usage)
-- [ ] Migration system
-- [ ] Connection pooling
-- [ ] Index definitions for common queries
-- [ ] Transaction support for multi-platform post creation
-
-### API Completion
-- [ ] Account management endpoints (list, get, delete, update)
-- [ ] Post history endpoints with pagination and filtering
-- [ ] Schedule management endpoints (list, update, cancel)
-- [ ] Graceful shutdown
-- [ ] Request ID middleware (tower-http request-id feature present)
-
-### Media Support
-- [ ] Image upload handling in post endpoint
-- [ ] Platform-specific media upload flows (Twitter media upload API, etc.)
-- [ ] File size and format validation
-- [ ] Instagram two-step container creation flow
+### Platform Improvements
+- [ ] LinkedIn: allow visibility settings (not hardcoded PUBLIC)
+- [ ] YouTube/TikTok: error on missing post ID instead of "unknown"
+- [ ] All platforms: log actual API errors instead of "Unknown error"
+- [ ] Return post URL from each platform response
 
 ---
 
 ## Low Priority
 
-### Background Jobs
-- [ ] Scheduled post processor (cron or tokio interval)
-- [ ] Token refresh scheduler
-- [ ] Failed post retry queue
-
-### Monitoring
+### Monitoring & Operations
+- [ ] Request ID tracing (X-Request-ID header)
 - [ ] Prometheus metrics endpoint
-- [ ] Structured logging improvements
-- [ ] Health check for database connectivity
-
-### Security Hardening
-- [ ] Security headers middleware (CSP, HSTS, X-Frame-Options)
+- [ ] Health check including DB connectivity
+- [ ] Security headers (CSP, HSTS, X-Frame-Options)
 - [ ] Audit logging for sensitive operations
-- [ ] API key management for service-to-service auth
 
-### Additional Platforms
-- [ ] Mastodon
-- [ ] Bluesky
-- [ ] Threads
-- [ ] Discord
-- [ ] Discord Webhooks
+### Additional Platforms (beyond original library)
+- [ ] Threads (Meta)
+- [ ] Pinterest
 
 ### Documentation
 - [ ] Rustdoc for public APIs
-- [ ] OpenAPI/Swagger spec generation
+- [ ] OpenAPI/Swagger spec
 - [ ] Getting started guide
-
----
-
-## Known Issues
-
-1. **Project does not compile** - rocksdb_client.rs has SurrealDB type mismatches
-2. **No authentication** - user_id is `Uuid::new_v4()` in all handlers
-3. **Tenant isolation is header-only** - not validated against any credential
-4. **OAuth state not verified** - CSRF token generated but never checked on callback
-5. **Instagram posting simplified** - doesn't use the required two-step container creation
-6. **JS artifacts remain** - eslint.config.js, prettier.config.js, tsconfig.json, src/, tests/ from original JS library
 
 ---
 
@@ -160,14 +152,12 @@ Each needs: post(), validate_token(), platform_name()
 ```
 crosspost-rs/
 ├── crates/
-│   ├── core/       # Types, errors, config (shared by all crates)
-│   ├── auth/       # OAuth2 flows, token management
+│   ├── core/       # Types, errors, config (shared by all)
+│   ├── auth/       # JWT, OAuth2, password hashing, token management
 │   ├── db/         # SurrealDB client, cache client
-│   ├── platforms/  # Platform trait + implementations (Twitter, FB, IG, ...)
+│   ├── platforms/  # Platform trait + 10 client implementations
 │   └── api/        # Axum server, routes, handlers, middleware
 ├── Dockerfile      # Multi-stage build
 ├── docker-compose.yml
 └── Cargo.toml      # Workspace root
 ```
-
-**Key dependencies:** Tokio, Axum, SurrealDB, oauth2, reqwest, thiserror, serde, chrono, uuid, validator, governor, argon2

@@ -58,3 +58,33 @@ impl Error {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_status_codes() {
+        assert_eq!(Error::Database("db".into()).status_code(), 500);
+        assert_eq!(Error::Internal("err".into()).status_code(), 500);
+        assert_eq!(Error::Auth("auth".into()).status_code(), 401);
+        assert_eq!(Error::Unauthorized("unauth".into()).status_code(), 401);
+        assert_eq!(Error::Forbidden("forbidden".into()).status_code(), 403);
+        assert_eq!(Error::NotFound("missing".into()).status_code(), 404);
+        assert_eq!(Error::Validation("bad".into()).status_code(), 400);
+        assert_eq!(Error::InvalidRequest("bad".into()).status_code(), 400);
+        assert_eq!(Error::RateLimitExceeded.status_code(), 429);
+        assert_eq!(Error::OAuth("oauth".into()).status_code(), 500);
+        assert_eq!(Error::Platform("plat".into()).status_code(), 500);
+        assert_eq!(Error::Config("cfg".into()).status_code(), 500);
+    }
+
+    #[test]
+    fn test_error_display() {
+        let err = Error::NotFound("user 123".to_string());
+        assert_eq!(err.to_string(), "Not found: user 123");
+
+        let err = Error::RateLimitExceeded;
+        assert_eq!(err.to_string(), "Rate limit exceeded");
+    }
+}

@@ -3,8 +3,9 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
+    Extension, Json,
 };
+use crosspost_auth::Claims;
 use crosspost_core::{
     ConnectedAccount, Error, OAuthAuthorizationResponse, OAuthCallbackQuery, Platform,
 };
@@ -12,9 +13,10 @@ use oauth2::TokenResponse;
 use std::{str::FromStr, sync::Arc};
 use uuid::Uuid;
 
-/// Initiate OAuth flow for a platform
+/// Initiate OAuth flow for a platform (requires authentication)
 pub async fn connect_platform(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
     Path(platform_str): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     let platform = Platform::from_str(&platform_str).map_err(Error::InvalidRequest)?;
@@ -35,9 +37,10 @@ pub async fn connect_platform(
         .oauth_handler
         .get_authorization_url(&oauth_client, platform)?;
 
-    // Store state token in cache for verification
+    // Store state token with user context: platform|user_id|tenant_id
     let cache_key = format!("oauth_state:{}", state_token);
-    state.cache.store_token(&cache_key, &platform_str).await?;
+    let cache_value = format!("{}|{}|{}", platform_str, claims.sub, claims.tenant_id);
+    state.cache.store_token(&cache_key, &cache_value).await?;
 
     Ok(Json(OAuthAuthorizationResponse {
         authorization_url: auth_url,
@@ -53,17 +56,29 @@ pub async fn oauth_callback(
 ) -> Result<impl IntoResponse, AppError> {
     let platform = Platform::from_str(&platform_str).map_err(Error::InvalidRequest)?;
 
-    // Verify state token
+    // Verify state token and extract user context
     let cache_key = format!("oauth_state:{}", query.state);
-    let stored_platform = state
+    let cached_value = state
         .cache
         .get_token(&cache_key)
         .await?
-        .ok_or_else(|| Error::OAuth("Invalid state parameter".to_string()))?;
+        .ok_or_else(|| Error::OAuth("Invalid or expired state parameter".to_string()))?;
+
+    // Parse cached value: "platform|user_id|tenant_id"
+    let parts: Vec<&str> = cached_value.split('|').collect();
+    if parts.len() != 3 {
+        return Err(Error::OAuth("Corrupted OAuth state".to_string()).into());
+    }
+    let (stored_platform, user_id_str, tenant_id_str) = (parts[0], parts[1], parts[2]);
 
     if stored_platform != platform_str {
         return Err(Error::OAuth("Platform mismatch".to_string()).into());
     }
+
+    let user_id = Uuid::parse_str(user_id_str)
+        .map_err(|_| Error::OAuth("Invalid user ID in state".to_string()))?;
+    let tenant_id = Uuid::parse_str(tenant_id_str)
+        .map_err(|_| Error::OAuth("Invalid tenant ID in state".to_string()))?;
 
     // Clean up state token
     state.cache.delete_token(&cache_key).await?;
@@ -95,13 +110,9 @@ pub async fn oauth_callback(
             chrono::Utc::now() + chrono::Duration::seconds(duration.as_secs() as i64)
         });
 
-    // TODO: Get actual user_id and tenant_id from authenticated session
-    let user_id = Uuid::new_v4(); // Placeholder
-    let tenant_id = Uuid::new_v4(); // Placeholder
-
-    // TODO: Fetch platform account info using access token
-    let platform_account_id = "placeholder_account_id".to_string();
-    let platform_account_name = "placeholder_name".to_string();
+    // TODO: Fetch platform account info using access token (platform-specific API calls)
+    let platform_account_id = format!("{}_{}", platform_str, user_id);
+    let platform_account_name = format!("{} account", platform_str);
 
     // Create connected account
     let account = ConnectedAccount {
@@ -123,18 +134,29 @@ pub async fn oauth_callback(
     Ok((StatusCode::OK, Json(account)))
 }
 
-/// Disconnect a connected account
+/// Disconnect a connected account (requires ownership)
 pub async fn disconnect_account(
     State(state): State<Arc<AppState>>,
+    Extension(claims): Extension<Claims>,
     Path(account_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    // TODO: Verify user owns this account
+    // Verify user owns this account
+    let account = state
+        .db
+        .get_connected_account(account_id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("Account {} not found", account_id)))?;
+
+    if account.user_id != claims.sub || account.tenant_id != claims.tenant_id {
+        return Err(Error::Forbidden("You do not own this account".to_string()).into());
+    }
+
     state.db.delete_connected_account(account_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// Helper to get platform OAuth config from AppState
-fn get_platform_oauth_config(
+pub(crate) fn get_platform_oauth_config(
     state: &AppState,
     platform: Platform,
 ) -> Result<&crosspost_core::config::PlatformOAuthConfig, Error> {

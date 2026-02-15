@@ -24,3 +24,37 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool> {
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hash_and_verify() {
+        let password = "my-secure-password-123";
+        let hash = hash_password(password).unwrap();
+
+        assert!(verify_password(password, &hash).unwrap());
+        assert!(!verify_password("wrong-password", &hash).unwrap());
+    }
+
+    #[test]
+    fn test_different_hashes_same_password() {
+        let password = "same-password";
+        let hash1 = hash_password(password).unwrap();
+        let hash2 = hash_password(password).unwrap();
+
+        // Different salts should produce different hashes
+        assert_ne!(hash1, hash2);
+
+        // But both should verify
+        assert!(verify_password(password, &hash1).unwrap());
+        assert!(verify_password(password, &hash2).unwrap());
+    }
+
+    #[test]
+    fn test_invalid_hash_format() {
+        let result = verify_password("password", "not-a-valid-hash");
+        assert!(result.is_err());
+    }
+}

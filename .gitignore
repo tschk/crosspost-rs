@@ -92,3 +92,5 @@ Cargo.lock
 # Claude
 
 .claude/
+
+.DS_Store

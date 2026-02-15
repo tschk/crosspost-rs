@@ -46,10 +46,10 @@ pub async fn create_post(
     for account_id in &request.account_ids {
         let account = state.db.get_connected_account(*account_id).await?;
 
-        let account = match account {
+        let mut account = match account {
             Some(acc) => {
-                // Verify account belongs to this user's tenant
-                if acc.tenant_id != tenant_id {
+                // Verify account belongs to this user and tenant
+                if acc.user_id != user_id || acc.tenant_id != tenant_id {
                     results.push(PlatformPostResult {
                         account_id: *account_id,
                         platform: crosspost_core::Platform::Twitter,
@@ -72,6 +72,28 @@ pub async fn create_post(
                 continue;
             }
         };
+
+        // Attempt token refresh if expired
+        if state.token_manager.is_token_expired(&account) {
+            let oauth_config =
+                crate::handlers::auth::get_platform_oauth_config(&state, account.platform);
+            if let Ok(oauth_cfg) = oauth_config {
+                if let Ok(oauth_client) = state.oauth_handler.create_oauth_client(
+                    account.platform,
+                    &oauth_cfg.client_id,
+                    &oauth_cfg.client_secret,
+                    &oauth_cfg.redirect_uri,
+                ) {
+                    if let Err(e) = state
+                        .token_manager
+                        .refresh_token_if_needed(&mut account, &oauth_client)
+                        .await
+                    {
+                        tracing::warn!("Token refresh failed for account {}: {}", account_id, e);
+                    }
+                }
+            }
+        }
 
         let post_request = PostRequest {
             content: request.content.clone(),

@@ -12,3 +12,12 @@ pub trait Database: Send + Sync {
     async fn init(&self) -> Result<()>;
     async fn health_check(&self) -> Result<()>;
 }
+
+/// Prelude for convenient imports
+///
+/// ```rust
+/// use crosspost_db::prelude::*;
+/// ```
+pub mod prelude {
+    pub use crate::{CacheClient, Database, SurrealDbClient};
+}

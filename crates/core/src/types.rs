@@ -227,3 +227,130 @@ pub struct OAuthCallbackQuery {
     pub code: String,
     pub state: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_platform_from_str() {
+        assert_eq!(Platform::from_str("twitter").unwrap(), Platform::Twitter);
+        assert_eq!(Platform::from_str("TWITTER").unwrap(), Platform::Twitter);
+        assert_eq!(Platform::from_str("Facebook").unwrap(), Platform::Facebook);
+        assert_eq!(Platform::from_str("linkedin").unwrap(), Platform::LinkedIn);
+        assert_eq!(Platform::from_str("youtube").unwrap(), Platform::YouTube);
+        assert_eq!(Platform::from_str("tiktok").unwrap(), Platform::TikTok);
+        assert_eq!(Platform::from_str("reddit").unwrap(), Platform::Reddit);
+        assert_eq!(Platform::from_str("twitch").unwrap(), Platform::Twitch);
+        assert_eq!(Platform::from_str("slack").unwrap(), Platform::Slack);
+        assert_eq!(Platform::from_str("telegram").unwrap(), Platform::Telegram);
+        assert!(Platform::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn test_platform_display() {
+        assert_eq!(Platform::Twitter.to_string(), "twitter");
+        assert_eq!(Platform::Facebook.to_string(), "facebook");
+        assert_eq!(Platform::YouTube.to_string(), "youtube");
+    }
+
+    #[test]
+    fn test_platform_as_str() {
+        assert_eq!(Platform::Twitter.as_str(), "twitter");
+        assert_eq!(Platform::Instagram.as_str(), "instagram");
+    }
+
+    #[test]
+    fn test_platform_roundtrip() {
+        for platform in [
+            Platform::Twitter,
+            Platform::Facebook,
+            Platform::Instagram,
+            Platform::LinkedIn,
+            Platform::YouTube,
+            Platform::TikTok,
+            Platform::Reddit,
+            Platform::Twitch,
+            Platform::Slack,
+            Platform::Telegram,
+        ] {
+            let s = platform.as_str();
+            let parsed = Platform::from_str(s).unwrap();
+            assert_eq!(platform, parsed);
+        }
+    }
+
+    #[test]
+    fn test_platform_serde_roundtrip() {
+        let platform = Platform::Twitter;
+        let json = serde_json::to_string(&platform).unwrap();
+        assert_eq!(json, "\"twitter\"");
+        let parsed: Platform = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, platform);
+    }
+
+    #[test]
+    fn test_post_status_serde() {
+        let status = PostStatus::Success;
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, "\"success\"");
+        let parsed: PostStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, status);
+    }
+
+    #[test]
+    fn test_create_post_request_validation() {
+        use validator::Validate;
+
+        let valid = CreatePostRequest {
+            content: "Hello world".to_string(),
+            account_ids: vec![Uuid::new_v4()],
+            media_urls: None,
+        };
+        assert!(valid.validate().is_ok());
+
+        let empty_content = CreatePostRequest {
+            content: String::new(),
+            account_ids: vec![Uuid::new_v4()],
+            media_urls: None,
+        };
+        assert!(empty_content.validate().is_err());
+
+        let no_accounts = CreatePostRequest {
+            content: "Hello".to_string(),
+            account_ids: vec![],
+            media_urls: None,
+        };
+        assert!(no_accounts.validate().is_err());
+    }
+
+    #[test]
+    fn test_register_request_validation() {
+        use validator::Validate;
+
+        let valid = RegisterRequest {
+            email: "test@example.com".to_string(),
+            name: "Test User".to_string(),
+            password: "securepassword".to_string(),
+            tenant_name: None,
+        };
+        assert!(valid.validate().is_ok());
+
+        let bad_email = RegisterRequest {
+            email: "not-an-email".to_string(),
+            name: "Test User".to_string(),
+            password: "securepassword".to_string(),
+            tenant_name: None,
+        };
+        assert!(bad_email.validate().is_err());
+
+        let short_password = RegisterRequest {
+            email: "test@example.com".to_string(),
+            name: "Test User".to_string(),
+            password: "short".to_string(),
+            tenant_name: None,
+        };
+        assert!(short_password.validate().is_err());
+    }
+}

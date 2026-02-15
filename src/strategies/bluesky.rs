@@ -3,16 +3,29 @@ use crate::error::{Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{BlueskyCredentials, PostOptions};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
+use tokio::sync::RwLock;
 
 /// Strategy for posting to Bluesky via the AT Protocol.
 ///
 /// Supports rich text facets (URLs, @mentions, #hashtags), image uploads with
 /// aspect ratios, and configurable PDS host. URLs > 27 chars count as 27 for length.
+/// Sessions are cached and reused for up to 5 minutes to avoid re-authenticating per post.
 pub struct BlueskyStrategy {
     client: reqwest::Client,
     credentials: BlueskyCredentials,
     host: String,
+    cached_session: RwLock<Option<CachedSession>>,
 }
+
+struct CachedSession {
+    session: CreateSessionResponse,
+    created_at: Instant,
+}
+
+/// Session cache duration (5 minutes). Bluesky JWTs last longer,
+/// but re-authenticating every 5 minutes is a safe balance.
+const SESSION_CACHE_DURATION: std::time::Duration = std::time::Duration::from_secs(300);
 
 impl BlueskyStrategy {
     /// Create a new Bluesky strategy with the given credentials.
@@ -31,10 +44,16 @@ impl BlueskyStrategy {
             .host
             .clone()
             .unwrap_or_else(|| "bsky.social".to_string());
+        crate::util::hosts::validate_public_host(&host)
+            .map_err(|e| Error::Validation(format!("Invalid Bluesky host: {}", e)))?;
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
             host,
+            cached_session: RwLock::new(None),
         })
     }
 
@@ -49,7 +68,34 @@ impl BlueskyStrategy {
         })
     }
 
-    async fn create_session(&self) -> Result<CreateSessionResponse> {
+    /// Get a cached session or create a new one if expired/missing.
+    async fn get_or_create_session(&self) -> Result<CreateSessionResponse> {
+        // Check cache first
+        {
+            let cache = self.cached_session.read().await;
+            if let Some(ref cached) = *cache {
+                if cached.created_at.elapsed() < SESSION_CACHE_DURATION {
+                    return Ok(cached.session.clone());
+                }
+            }
+        }
+
+        // Cache miss or expired — create new session
+        let session = self.create_session_fresh().await?;
+
+        // Store in cache
+        {
+            let mut cache = self.cached_session.write().await;
+            *cache = Some(CachedSession {
+                session: session.clone(),
+                created_at: Instant::now(),
+            });
+        }
+
+        Ok(session)
+    }
+
+    async fn create_session_fresh(&self) -> Result<CreateSessionResponse> {
         let body = CreateSessionRequest {
             identifier: self.credentials.identifier.clone(),
             password: self.credentials.password.clone(),
@@ -210,7 +256,7 @@ struct CreateSessionRequest {
     password: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct CreateSessionResponse {
     #[serde(rename = "accessJwt")]
     access_jwt: String,
@@ -349,7 +395,7 @@ impl Strategy for BlueskyStrategy {
     }
 
     async fn post(&self, message: &str, options: Option<&PostOptions>) -> Result<PostResponse> {
-        let session = self.create_session().await?;
+        let session = self.get_or_create_session().await?;
 
         let images = get_images(options);
         let embed = if !images.is_empty() {
@@ -447,7 +493,7 @@ impl Strategy for BlueskyStrategy {
     }
 
     async fn validate_credentials(&self) -> Result<bool> {
-        match self.create_session().await {
+        match self.create_session_fresh().await {
             Ok(_) => Ok(true),
             Err(_) => Ok(false),
         }

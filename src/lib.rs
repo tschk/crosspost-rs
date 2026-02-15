@@ -53,11 +53,13 @@ pub use strategy::{PostResponse, Strategy};
 pub use types::{ImageEmbed, PostOptions, PostResult, PostToEntry};
 
 // Re-export all credential types
+#[cfg(feature = "nostr")]
+pub use types::NostrCredentials;
 pub use types::{
     BlueskyCredentials, DevtoCredentials, DiscordCredentials, DiscordWebhookCredentials,
     FacebookCredentials, InstagramCredentials, LinkedInCredentials, MastodonCredentials,
-    NostrCredentials, RedditCredentials, SlackCredentials, TelegramCredentials, TikTokCredentials,
-    TwitchCredentials, TwitterCredentials, YouTubeCredentials,
+    RedditCredentials, SlackCredentials, TelegramCredentials, TikTokCredentials, TwitchCredentials,
+    TwitterCredentials, YouTubeCredentials,
 };
 
 // Re-export all strategy types
@@ -69,6 +71,7 @@ pub use strategies::facebook::FacebookStrategy;
 pub use strategies::instagram::InstagramStrategy;
 pub use strategies::linkedin::LinkedInStrategy;
 pub use strategies::mastodon::MastodonStrategy;
+#[cfg(feature = "nostr")]
 pub use strategies::nostr::NostrStrategy;
 pub use strategies::reddit::RedditStrategy;
 pub use strategies::slack::SlackStrategy;

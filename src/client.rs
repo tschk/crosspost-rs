@@ -156,3 +156,208 @@ impl Client {
         &self.strategies
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+    use crate::strategy::PostResponse;
+
+    /// A mock strategy for testing the Client orchestrator.
+    struct MockStrategy {
+        strategy_id: &'static str,
+        strategy_name: &'static str,
+        max_length: usize,
+        should_fail: bool,
+    }
+
+    impl MockStrategy {
+        fn success(id: &'static str, name: &'static str) -> Self {
+            Self {
+                strategy_id: id,
+                strategy_name: name,
+                max_length: 280,
+                should_fail: false,
+            }
+        }
+
+        fn failing(id: &'static str, name: &'static str) -> Self {
+            Self {
+                strategy_id: id,
+                strategy_name: name,
+                max_length: 280,
+                should_fail: true,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Strategy for MockStrategy {
+        fn name(&self) -> &str {
+            self.strategy_name
+        }
+        fn id(&self) -> &str {
+            self.strategy_id
+        }
+        fn max_message_length(&self) -> usize {
+            self.max_length
+        }
+        async fn post(
+            &self,
+            _message: &str,
+            _options: Option<&PostOptions>,
+        ) -> crate::error::Result<PostResponse> {
+            if self.should_fail {
+                Err(Error::Platform("Mock API error".to_string()))
+            } else {
+                Ok(PostResponse {
+                    id: format!("{}-post-123", self.strategy_id),
+                    url: Some(format!("https://example.com/{}/123", self.strategy_id)),
+                })
+            }
+        }
+        async fn validate_credentials(&self) -> crate::error::Result<bool> {
+            Ok(!self.should_fail)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_to_all_strategies() {
+        let client = Client::new(vec![
+            Box::new(MockStrategy::success("mock1", "Mock One")),
+            Box::new(MockStrategy::success("mock2", "Mock Two")),
+        ]);
+
+        let results = client.post("Hello!", None).await;
+        assert_eq!(results.len(), 2);
+
+        for result in &results {
+            match result {
+                PostResult::Success { name, post_id, url } => {
+                    assert!(!name.is_empty());
+                    assert!(!post_id.is_empty());
+                    assert!(url.is_some());
+                }
+                PostResult::Failure { .. } => panic!("Expected success"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_error_isolation() {
+        let client = Client::new(vec![
+            Box::new(MockStrategy::success("good", "Good")),
+            Box::new(MockStrategy::failing("bad", "Bad")),
+        ]);
+
+        let results = client.post("Hello!", None).await;
+        assert_eq!(results.len(), 2);
+
+        let successes: Vec<_> = results
+            .iter()
+            .filter(|r| matches!(r, PostResult::Success { .. }))
+            .collect();
+        let failures: Vec<_> = results
+            .iter()
+            .filter(|r| matches!(r, PostResult::Failure { .. }))
+            .collect();
+
+        assert_eq!(successes.len(), 1);
+        assert_eq!(failures.len(), 1);
+
+        if let PostResult::Failure { reason, .. } = &failures[0] {
+            assert!(reason.contains("Mock API error"));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_message_too_long() {
+        let client = Client::new(vec![Box::new(MockStrategy::success("short", "Short"))]);
+
+        let long_message = "x".repeat(300); // exceeds max_length of 280
+        let results = client.post(&long_message, None).await;
+        assert_eq!(results.len(), 1);
+
+        match &results[0] {
+            PostResult::Failure { reason, .. } => {
+                assert!(reason.contains("Message too long"));
+                assert!(reason.contains("300"));
+                assert!(reason.contains("280"));
+            }
+            PostResult::Success { .. } => panic!("Expected failure for long message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_to_specific_strategies() {
+        let client = Client::new(vec![
+            Box::new(MockStrategy::success("alpha", "Alpha")),
+            Box::new(MockStrategy::success("beta", "Beta")),
+        ]);
+
+        let entries = vec![PostToEntry {
+            strategy_id: "alpha".to_string(),
+            message: "Hello Alpha!".to_string(),
+            images: None,
+        }];
+
+        let results = client.post_to(&entries).await;
+        assert_eq!(results.len(), 1);
+
+        match &results[0] {
+            PostResult::Success { name, .. } => assert_eq!(name, "Alpha"),
+            PostResult::Failure { .. } => panic!("Expected success"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_to_unknown_strategy() {
+        let client = Client::new(vec![Box::new(MockStrategy::success("alpha", "Alpha"))]);
+
+        let entries = vec![PostToEntry {
+            strategy_id: "nonexistent".to_string(),
+            message: "Hello!".to_string(),
+            images: None,
+        }];
+
+        let results = client.post_to(&entries).await;
+        assert_eq!(results.len(), 1);
+
+        match &results[0] {
+            PostResult::Failure { name, reason } => {
+                assert_eq!(name, "nonexistent");
+                assert!(reason.contains("No strategy found"));
+            }
+            PostResult::Success { .. } => panic!("Expected failure"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_empty_client() {
+        let client = Client::new(vec![]);
+        let results = client.post("Hello!", None).await;
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_client_debug() {
+        let client = Client::new(vec![
+            Box::new(MockStrategy::success("alpha", "Alpha")),
+            Box::new(MockStrategy::success("beta", "Beta")),
+        ]);
+        let debug = format!("{:?}", client);
+        assert!(debug.contains("alpha"));
+        assert!(debug.contains("beta"));
+    }
+
+    #[test]
+    fn test_strategies_accessor() {
+        let client = Client::new(vec![
+            Box::new(MockStrategy::success("a", "A")),
+            Box::new(MockStrategy::success("b", "B")),
+        ]);
+        assert_eq!(client.strategies().len(), 2);
+        assert_eq!(client.strategies()[0].id(), "a");
+        assert_eq!(client.strategies()[1].id(), "b");
+    }
+}

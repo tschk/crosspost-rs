@@ -36,6 +36,20 @@ pub async fn run_scheduler(state: Arc<AppState>) {
                             }
                         };
 
+                        // Verify account belongs to the scheduled post's owner
+                        if account.user_id != scheduled_post.user_id
+                            || account.tenant_id != scheduled_post.tenant_id
+                        {
+                            tracing::warn!(
+                                "Scheduled post {}: account {} not owned by user {}",
+                                scheduled_post.id,
+                                account_id,
+                                scheduled_post.user_id
+                            );
+                            all_success = false;
+                            continue;
+                        }
+
                         let strategy = match super::handlers::posts::create_strategy_for_account(
                             &account, &state,
                         ) {

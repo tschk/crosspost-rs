@@ -8,8 +8,22 @@ repository = "https://github.com/GraftAI-com/crosspost-rs"
 description = "Cross-post messages to multiple social media platforms"
 
 [features]
-default = []
+default = ["nostr", "image-compression"]
+nostr = [
+    "dep:secp256k1",
+    "dep:sha2",
+    "dep:hex",
+    "dep:bech32",
+    "dep:tokio-tungstenite",
+    "dep:futures-util",
+]
+image-compression = [
+    "dep:mozjpeg",
+    "dep:oxipng",
+]
 server = [
+    "nostr",
+    "image-compression",
     "dep:axum",
     "dep:tower",
     "dep:tower-http",
@@ -67,17 +81,17 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 infer = "0.16"
 base64 = "0.22"
 
-# Image compression
-mozjpeg = "0.10"
-oxipng = "9"
+# Image compression (optional, behind "image-compression" feature)
+mozjpeg = { version = "0.10", optional = true }
+oxipng = { version = "9", optional = true }
 
-# Nostr support
-secp256k1 = { version = "0.29", features = ["global-context", "rand-std"] }
-sha2 = "0.10"
-hex = "0.4"
-bech32 = "0.11"
-tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
-futures-util = "0.3"
+# Nostr support (optional, behind "nostr" feature)
+secp256k1 = { version = "0.29", features = ["global-context", "rand-std"], optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
+bech32 = { version = "0.11", optional = true }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"], optional = true }
+futures-util = { version = "0.3", optional = true }
 
 # --- Server-only dependencies (behind "server" feature) ---
 
@@ -114,3 +128,4 @@ dashmap = { version = "6", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.42", features = ["test-util"] }
+wiremock = "0.6.5"

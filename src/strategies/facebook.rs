@@ -20,7 +20,10 @@ impl FacebookStrategy {
             ));
         }
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
         })
     }
@@ -50,7 +53,7 @@ impl FacebookStrategy {
             let response = self
                 .client
                 .post("https://graph.facebook.com/v18.0/me/photos")
-                .query(&[("access_token", &self.credentials.access_token)])
+                .bearer_auth(&self.credentials.access_token)
                 .multipart(form)
                 .send()
                 .await
@@ -92,7 +95,7 @@ impl FacebookStrategy {
             let response = self
                 .client
                 .post("https://graph.facebook.com/v18.0/me/photos")
-                .query(&[("access_token", &self.credentials.access_token)])
+                .bearer_auth(&self.credentials.access_token)
                 .multipart(form)
                 .send()
                 .await
@@ -116,13 +119,8 @@ impl FacebookStrategy {
             media_ids.push(fb_response.id);
         }
 
-        let mut query_params: Vec<(String, String)> = vec![
-            (
-                "access_token".to_string(),
-                self.credentials.access_token.clone(),
-            ),
-            ("message".to_string(), caption.to_string()),
-        ];
+        let mut query_params: Vec<(String, String)> =
+            vec![("message".to_string(), caption.to_string())];
         for (i, media_id) in media_ids.iter().enumerate() {
             query_params.push((
                 format!("attached_media[{}]", i),
@@ -133,6 +131,7 @@ impl FacebookStrategy {
         let response = self
             .client
             .post("https://graph.facebook.com/v18.0/me/feed")
+            .bearer_auth(&self.credentials.access_token)
             .query(&query_params)
             .send()
             .await

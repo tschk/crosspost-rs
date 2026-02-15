@@ -1,8 +1,8 @@
 use crate::server::api::{middleware::AppError, state::AppState};
 use crate::server::auth::Claims;
 use crate::server::core::{
-    ConnectedAccount, DirectConnectRequest, Error, OAuthAuthorizationResponse, OAuthCallbackQuery,
-    Platform,
+    ConnectedAccount, ConnectedAccountResponse, DirectConnectRequest, Error,
+    OAuthAuthorizationResponse, OAuthCallbackQuery, Platform,
 };
 use crate::{
     BlueskyCredentials, BlueskyStrategy, DevtoCredentials, DevtoStrategy, DiscordCredentials,
@@ -171,7 +171,10 @@ pub async fn oauth_callback(
 
     let account = state.db.create_connected_account(account).await?;
 
-    Ok((StatusCode::CREATED, Json(account)))
+    Ok((
+        StatusCode::CREATED,
+        Json(ConnectedAccountResponse::from(account)),
+    ))
 }
 
 /// Disconnect a connected account (requires ownership)
@@ -339,7 +342,10 @@ pub async fn connect_direct(
 
     let account = state.db.create_connected_account(account).await?;
 
-    Ok((StatusCode::CREATED, Json(account)))
+    Ok((
+        StatusCode::CREATED,
+        Json(ConnectedAccountResponse::from(account)),
+    ))
 }
 
 /// Helper to get platform OAuth config from AppState

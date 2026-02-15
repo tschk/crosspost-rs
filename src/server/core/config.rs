@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
@@ -8,12 +8,32 @@ pub struct AppConfig {
     pub auth: AuthConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+impl std::fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("server", &self.server)
+            .field("database", &self.database)
+            .field("auth", &self.auth)
+            .field("oauth", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Clone, Deserialize)]
 pub struct AuthConfig {
     pub jwt_secret: String,
     /// Token expiry in seconds (default: 3600 = 1 hour)
     #[serde(default = "default_token_expiry")]
     pub token_expiry_secs: u64,
+}
+
+impl std::fmt::Debug for AuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuthConfig")
+            .field("jwt_secret", &"[REDACTED]")
+            .field("token_expiry_secs", &self.token_expiry_secs)
+            .finish()
+    }
 }
 
 fn default_token_expiry() -> u64 {
@@ -36,7 +56,7 @@ pub struct DatabaseConfig {
     pub rocksdb_path: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 pub struct OAuthConfig {
     pub twitter: Option<PlatformOAuthConfig>,
     pub facebook: Option<PlatformOAuthConfig>,
@@ -56,11 +76,21 @@ pub struct OAuthConfig {
     pub nostr: Option<PlatformOAuthConfig>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize)]
 pub struct PlatformOAuthConfig {
     pub client_id: String,
     pub client_secret: String,
     pub redirect_uri: String,
+}
+
+impl std::fmt::Debug for PlatformOAuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlatformOAuthConfig")
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"[REDACTED]")
+            .field("redirect_uri", &self.redirect_uri)
+            .finish()
+    }
 }
 
 impl AppConfig {

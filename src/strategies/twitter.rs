@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 pub struct TwitterStrategy {
     client: reqwest::Client,
     credentials: TwitterCredentials,
+    api_base: String,
+    upload_base: String,
 }
 
 impl TwitterStrategy {
@@ -22,9 +24,22 @@ impl TwitterStrategy {
             ));
         }
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://api.twitter.com".to_string(),
+            upload_base: "https://upload.twitter.com".to_string(),
         })
+    }
+
+    /// Override the API base URL (for testing with mock servers).
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.upload_base = base.clone();
+        self.api_base = base;
+        self
     }
 
     /// Create a Twitter strategy from environment variables.
@@ -114,7 +129,7 @@ impl Strategy for TwitterStrategy {
 
                 let upload_resp = self
                     .client
-                    .post("https://upload.twitter.com/1.1/media/upload.json")
+                    .post(format!("{}/1.1/media/upload.json", self.upload_base))
                     .bearer_auth(&self.credentials.access_token)
                     .multipart(form)
                     .send()
@@ -155,7 +170,7 @@ impl Strategy for TwitterStrategy {
 
         let response = self
             .client
-            .post("https://api.twitter.com/2/tweets")
+            .post(format!("{}/2/tweets", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .json(&body)
             .send()
@@ -190,7 +205,7 @@ impl Strategy for TwitterStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://api.twitter.com/2/users/me")
+            .get(format!("{}/2/users/me", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .send()
             .await
@@ -203,6 +218,16 @@ impl Strategy for TwitterStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> TwitterStrategy {
+        TwitterStrategy::new(TwitterCredentials {
+            access_token: "test-token".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -219,10 +244,7 @@ mod tests {
 
     #[test]
     fn test_calculate_message_length() {
-        let strategy = TwitterStrategy::new(TwitterCredentials {
-            access_token: "test".to_string(),
-        })
-        .unwrap();
+        let strategy = test_strategy();
 
         assert_eq!(strategy.calculate_message_length("hello"), 5);
         // URL counts as 23 chars
@@ -235,13 +257,89 @@ mod tests {
 
     #[test]
     fn test_strategy_metadata() {
-        let strategy = TwitterStrategy::new(TwitterCredentials {
-            access_token: "test".to_string(),
-        })
-        .unwrap();
+        let strategy = test_strategy();
 
         assert_eq!(strategy.id(), "twitter");
         assert_eq!(strategy.name(), "X (formerly Twitter)");
         assert_eq!(strategy.max_message_length(), 280);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/2/tweets"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {"id": "123"}
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello Twitter!", None).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response.id, "123");
+        assert_eq!(
+            response.url.as_deref(),
+            Some("https://twitter.com/i/web/status/123")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/2/tweets"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello!", None).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Twitter API error"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/2/users/me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": {"id": "1", "username": "testuser"}
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/2/users/me"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

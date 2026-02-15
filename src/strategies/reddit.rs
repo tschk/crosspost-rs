@@ -22,8 +22,9 @@ impl RedditStrategy {
         Ok(Self {
             client: reqwest::Client::builder()
                 .user_agent("crosspost-rs/0.1.0")
+                .timeout(std::time::Duration::from_secs(30))
                 .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
         })
     }

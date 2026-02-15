@@ -10,6 +10,7 @@ pub mod facebook;
 pub mod instagram;
 pub mod linkedin;
 pub mod mastodon;
+#[cfg(feature = "nostr")]
 pub mod nostr;
 pub mod reddit;
 pub mod slack;

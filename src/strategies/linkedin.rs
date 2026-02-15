@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub struct LinkedInStrategy {
     client: reqwest::Client,
     credentials: LinkedInCredentials,
+    api_base: String,
 }
 
 impl LinkedInStrategy {
@@ -20,9 +21,20 @@ impl LinkedInStrategy {
             ));
         }
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://api.linkedin.com".to_string(),
         })
+    }
+
+    /// Override the API base URL (for testing with mock servers).
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -124,7 +136,7 @@ impl Strategy for LinkedInStrategy {
         // Get user's profile URN
         let profile = self
             .client
-            .get("https://api.linkedin.com/v2/userinfo")
+            .get(format!("{}/v2/userinfo", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .send()
             .await
@@ -166,7 +178,7 @@ impl Strategy for LinkedInStrategy {
 
                 let register_resp = self
                     .client
-                    .post("https://api.linkedin.com/v2/assets?action=registerUpload")
+                    .post(format!("{}/v2/assets?action=registerUpload", self.api_base))
                     .bearer_auth(&self.credentials.access_token)
                     .json(&register_body)
                     .send()
@@ -256,7 +268,7 @@ impl Strategy for LinkedInStrategy {
 
         let response = self
             .client
-            .post("https://api.linkedin.com/v2/ugcPosts")
+            .post(format!("{}/v2/ugcPosts", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .header("X-Restli-Protocol-Version", "2.0.0")
             .json(&body)
@@ -292,7 +304,7 @@ impl Strategy for LinkedInStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://api.linkedin.com/v2/userinfo")
+            .get(format!("{}/v2/userinfo", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .send()
             .await
@@ -305,6 +317,16 @@ impl Strategy for LinkedInStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> LinkedInStrategy {
+        LinkedInStrategy::new(LinkedInCredentials {
+            access_token: "test-token".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -321,12 +343,106 @@ mod tests {
 
     #[test]
     fn test_strategy_metadata() {
-        let s = LinkedInStrategy::new(LinkedInCredentials {
-            access_token: "t".to_string(),
-        })
-        .unwrap();
+        let s = test_strategy();
         assert_eq!(s.id(), "linkedin");
         assert_eq!(s.name(), "LinkedIn");
         assert_eq!(s.max_message_length(), 3000);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/userinfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "abc123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/ugcPosts"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": "urn:li:share:123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello LinkedIn!", None).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response.id, "urn:li:share:123");
+        assert_eq!(
+            response.url.as_deref(),
+            Some("https://www.linkedin.com/feed/update/urn:li:share:123")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/userinfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "abc123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/ugcPosts"))
+            .respond_with(ResponseTemplate::new(422).set_body_string("Unprocessable Entity"))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello!", None).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("LinkedIn API error"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/userinfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "abc123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/userinfo"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

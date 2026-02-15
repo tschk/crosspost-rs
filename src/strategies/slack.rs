@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub struct SlackStrategy {
     client: reqwest::Client,
     credentials: SlackCredentials,
+    api_base: String,
 }
 
 impl SlackStrategy {
@@ -18,8 +19,12 @@ impl SlackStrategy {
             return Err(Error::Validation("Slack bot_token is required".to_string()));
         }
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://slack.com/api".to_string(),
         })
     }
 
@@ -30,6 +35,13 @@ impl SlackStrategy {
         })
     }
 
+    /// Override the API base URL (for testing with mock servers).
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
+    }
+
     fn channel(&self) -> &str {
         self.credentials.channel.as_deref().unwrap_or("#general")
     }
@@ -38,7 +50,7 @@ impl SlackStrategy {
         // Step 1: Get upload URL
         let url_response = self
             .client
-            .get("https://slack.com/api/files.getUploadURLExternal")
+            .get(format!("{}/files.getUploadURLExternal", self.api_base))
             .bearer_auth(&self.credentials.bot_token)
             .query(&[("filename", filename), ("length", &data.len().to_string())])
             .send()
@@ -79,7 +91,7 @@ impl SlackStrategy {
         });
 
         self.client
-            .post("https://slack.com/api/files.completeUploadExternal")
+            .post(format!("{}/files.completeUploadExternal", self.api_base))
             .bearer_auth(&self.credentials.bot_token)
             .json(&complete_body)
             .send()
@@ -148,7 +160,7 @@ impl Strategy for SlackStrategy {
 
         let response = self
             .client
-            .post("https://slack.com/api/chat.postMessage")
+            .post(format!("{}/chat.postMessage", self.api_base))
             .bearer_auth(&self.credentials.bot_token)
             .json(&body)
             .send()
@@ -197,7 +209,7 @@ impl Strategy for SlackStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .post("https://slack.com/api/auth.test")
+            .post(format!("{}/auth.test", self.api_base))
             .bearer_auth(&self.credentials.bot_token)
             .send()
             .await
@@ -224,6 +236,17 @@ impl Strategy for SlackStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> SlackStrategy {
+        SlackStrategy::new(SlackCredentials {
+            bot_token: "xoxb-123".to_string(),
+            channel: None,
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -259,13 +282,97 @@ mod tests {
 
     #[test]
     fn test_strategy_metadata() {
-        let s = SlackStrategy::new(SlackCredentials {
-            bot_token: "xoxb-123".to_string(),
-            channel: None,
-        })
-        .unwrap();
+        let s = test_strategy();
         assert_eq!(s.id(), "slack");
         assert_eq!(s.name(), "Slack");
         assert_eq!(s.max_message_length(), 40000);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "channel": "C123",
+                "ts": "1234567890.123456"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello Slack!", None).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response.id, "1234567890.123456");
+        assert_eq!(
+            response.url.as_deref(),
+            Some("https://slack.com/archives/C123/p1234567890123456")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/chat.postMessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": false,
+                "error": "channel_not_found"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello!", None).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("channel_not_found"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/auth.test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "user_id": "U123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/auth.test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": false,
+                "error": "invalid_auth"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

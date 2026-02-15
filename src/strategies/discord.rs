@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub struct DiscordStrategy {
     client: reqwest::Client,
     credentials: DiscordCredentials,
+    api_base: String,
 }
 
 impl DiscordStrategy {
@@ -25,9 +26,20 @@ impl DiscordStrategy {
             ));
         }
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://discord.com/api/v10".to_string(),
         })
+    }
+
+    /// Override the API base URL (for testing with mock servers).
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -97,8 +109,8 @@ impl Strategy for DiscordStrategy {
 
     async fn post(&self, message: &str, options: Option<&PostOptions>) -> Result<PostResponse> {
         let url = format!(
-            "https://discord.com/api/v10/channels/{}/messages",
-            self.credentials.channel_id
+            "{}/channels/{}/messages",
+            self.api_base, self.credentials.channel_id
         );
 
         let images = get_images(options);
@@ -160,7 +172,7 @@ impl Strategy for DiscordStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://discord.com/api/v10/users/@me")
+            .get(format!("{}/users/@me", self.api_base))
             .header(
                 "Authorization",
                 format!("Bot {}", self.credentials.bot_token),
@@ -176,6 +188,17 @@ impl Strategy for DiscordStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> DiscordStrategy {
+        DiscordStrategy::new(DiscordCredentials {
+            bot_token: "test-token".to_string(),
+            channel_id: "ch123".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -200,13 +223,91 @@ mod tests {
 
     #[test]
     fn test_strategy_metadata() {
-        let s = DiscordStrategy::new(DiscordCredentials {
-            bot_token: "t".to_string(),
-            channel_id: "c".to_string(),
-        })
-        .unwrap();
+        let s = test_strategy();
         assert_eq!(s.id(), "discord");
         assert_eq!(s.name(), "Discord");
         assert_eq!(s.max_message_length(), 2000);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/channels/ch123/messages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "msg123",
+                "channel_id": "ch456",
+                "guild_id": "g789"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello Discord!", None).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response.id, "msg123");
+        assert_eq!(
+            response.url.as_deref(),
+            Some("https://discord.com/channels/g789/ch456/msg123")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/channels/ch123/messages"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello!", None).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Discord API error"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/users/@me"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "1",
+                "username": "testbot"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/users/@me"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

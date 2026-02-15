@@ -303,6 +303,7 @@ pub async fn create_post(
                         data: compressed,
                         alt: img_data.alt.clone(),
                         mime_type: Some(mime),
+                        image_url: None,
                     });
                 }
             }

@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub struct MastodonStrategy {
     client: reqwest::Client,
     credentials: MastodonCredentials,
+    api_base: String,
 }
 
 impl MastodonStrategy {
@@ -23,10 +24,24 @@ impl MastodonStrategy {
         if credentials.host.is_empty() {
             return Err(Error::Validation("Mastodon host is required".to_string()));
         }
+        crate::util::hosts::validate_public_host(&credentials.host)
+            .map_err(|e| Error::Validation(format!("Invalid Mastodon host: {}", e)))?;
+        let api_base = format!("https://{}", credentials.host);
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base,
         })
+    }
+
+    /// Override the API base URL (for testing with mock servers).
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     /// Create a Mastodon strategy from environment variables.
@@ -55,7 +70,7 @@ impl MastodonStrategy {
             form = form.text("description", alt_text.to_string());
         }
 
-        let url = format!("https://{}/api/v2/media", self.credentials.host);
+        let url = format!("{}/api/v2/media", self.api_base);
         let response = self
             .client
             .post(&url)
@@ -124,7 +139,7 @@ impl Strategy for MastodonStrategy {
             media_ids.push(media_id);
         }
 
-        let url = format!("https://{}/api/v1/statuses", self.credentials.host);
+        let url = format!("{}/api/v1/statuses", self.api_base);
 
         let mut body = serde_json::json!({
             "status": message,
@@ -166,10 +181,7 @@ impl Strategy for MastodonStrategy {
     }
 
     async fn validate_credentials(&self) -> Result<bool> {
-        let url = format!(
-            "https://{}/api/v1/accounts/verify_credentials",
-            self.credentials.host
-        );
+        let url = format!("{}/api/v1/accounts/verify_credentials", self.api_base);
 
         let response = self
             .client
@@ -186,6 +198,17 @@ impl Strategy for MastodonStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> MastodonStrategy {
+        MastodonStrategy::new(MastodonCredentials {
+            access_token: "test-token".to_string(),
+            host: "mastodon.social".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -209,14 +232,106 @@ mod tests {
     }
 
     #[test]
-    fn test_strategy_metadata() {
-        let s = MastodonStrategy::new(MastodonCredentials {
-            access_token: "t".to_string(),
-            host: "mastodon.social".to_string(),
+    fn test_rejects_private_host() {
+        assert!(MastodonStrategy::new(MastodonCredentials {
+            access_token: "token".to_string(),
+            host: "localhost".to_string(),
         })
-        .unwrap();
+        .is_err());
+
+        assert!(MastodonStrategy::new(MastodonCredentials {
+            access_token: "token".to_string(),
+            host: "169.254.169.254".to_string(),
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn test_strategy_metadata() {
+        let s = test_strategy();
         assert_eq!(s.id(), "mastodon");
         assert_eq!(s.name(), "Mastodon");
         assert_eq!(s.max_message_length(), 500);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/statuses"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "109876543210",
+                "url": "https://mastodon.social/@user/109876543210"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello Mastodon!", None).await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response.id, "109876543210");
+        assert_eq!(
+            response.url.as_deref(),
+            Some("https://mastodon.social/@user/109876543210")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/statuses"))
+            .respond_with(ResponseTemplate::new(422).set_body_string("Unprocessable Entity"))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+
+        let result = strategy.post("Hello!", None).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Mastodon API error"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/accounts/verify_credentials"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "1",
+                "username": "testuser"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/accounts/verify_credentials"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

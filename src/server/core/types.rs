@@ -263,6 +263,52 @@ pub struct DirectConnectRequest {
     pub account_name: Option<String>,
 }
 
+/// API-safe response for a connected account (strips tokens)
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectedAccountResponse {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub tenant_id: Uuid,
+    pub platform: Platform,
+    pub platform_account_id: String,
+    pub platform_account_name: String,
+    pub token_expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<ConnectedAccount> for ConnectedAccountResponse {
+    fn from(a: ConnectedAccount) -> Self {
+        Self {
+            id: a.id,
+            user_id: a.user_id,
+            tenant_id: a.tenant_id,
+            platform: a.platform,
+            platform_account_id: a.platform_account_id,
+            platform_account_name: a.platform_account_name,
+            token_expires_at: a.token_expires_at,
+            created_at: a.created_at,
+            updated_at: a.updated_at,
+        }
+    }
+}
+
+impl From<&ConnectedAccount> for ConnectedAccountResponse {
+    fn from(a: &ConnectedAccount) -> Self {
+        Self {
+            id: a.id,
+            user_id: a.user_id,
+            tenant_id: a.tenant_id,
+            platform: a.platform,
+            platform_account_id: a.platform_account_id.clone(),
+            platform_account_name: a.platform_account_name.clone(),
+            token_expires_at: a.token_expires_at,
+            created_at: a.created_at,
+            updated_at: a.updated_at,
+        }
+    }
+}
+
 /// Pagination query parameters
 #[derive(Debug, Clone, Deserialize)]
 pub struct PaginationQuery {

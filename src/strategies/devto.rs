@@ -12,6 +12,7 @@ use serde::Deserialize;
 pub struct DevtoStrategy {
     client: reqwest::Client,
     credentials: DevtoCredentials,
+    api_base: String,
 }
 
 impl DevtoStrategy {
@@ -20,9 +21,20 @@ impl DevtoStrategy {
             return Err(Error::Validation("Dev.to api_key is required".to_string()));
         }
         Ok(Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://dev.to/api".to_string(),
         })
+    }
+
+    /// Override the API base URL (for testing with mock servers).
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -85,7 +97,7 @@ impl Strategy for DevtoStrategy {
 
         let response = self
             .client
-            .post("https://dev.to/api/articles")
+            .post(format!("{}/articles", self.api_base))
             .header("api-key", &self.credentials.api_key)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -115,7 +127,7 @@ impl Strategy for DevtoStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://dev.to/api/users/me")
+            .get(format!("{}/users/me", self.api_base))
             .header("api-key", &self.credentials.api_key)
             .send()
             .await
@@ -128,6 +140,9 @@ impl Strategy for DevtoStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn test_new_validates_credentials() {
@@ -151,5 +166,105 @@ mod tests {
         assert_eq!(s.id(), "devto");
         assert_eq!(s.name(), "Dev.to");
         assert_eq!(s.max_message_length(), usize::MAX);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/articles"))
+            .and(header("api-key", "test-key"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
+                "id": 12345,
+                "url": "https://dev.to/testuser/my-article-abc123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = DevtoStrategy::new(DevtoCredentials {
+            api_key: "test-key".to_string(),
+        })
+        .unwrap()
+        .with_api_base(mock_server.uri());
+
+        let result = strategy
+            .post("My Article Title\nArticle body here", None)
+            .await;
+        assert!(result.is_ok());
+
+        let response = result.unwrap();
+        assert_eq!(response.id, "12345");
+        assert_eq!(
+            response.url.as_deref(),
+            Some("https://dev.to/testuser/my-article-abc123")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/articles"))
+            .respond_with(ResponseTemplate::new(422).set_body_string("Validation failed"))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = DevtoStrategy::new(DevtoCredentials {
+            api_key: "bad-key".to_string(),
+        })
+        .unwrap()
+        .with_api_base(mock_server.uri());
+
+        let result = strategy.post("Title\nBody", None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Dev.to API error"));
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/users/me"))
+            .and(header("api-key", "valid-key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 1,
+                "username": "testuser"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = DevtoStrategy::new(DevtoCredentials {
+            api_key: "valid-key".to_string(),
+        })
+        .unwrap()
+        .with_api_base(mock_server.uri());
+
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/users/me"))
+            .respond_with(ResponseTemplate::new(401))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = DevtoStrategy::new(DevtoCredentials {
+            api_key: "bad-key".to_string(),
+        })
+        .unwrap()
+        .with_api_base(mock_server.uri());
+
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

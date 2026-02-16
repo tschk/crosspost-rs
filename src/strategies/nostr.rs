@@ -11,6 +11,7 @@ use tokio_tungstenite::tungstenite;
 ///
 /// Signs events with secp256k1 and publishes to one or more relays via WebSocket.
 /// Supports hex and bech32 (nsec1) private key formats.
+#[derive(Debug)]
 pub struct NostrStrategy {
     secret_key: SecretKey,
     relays: Vec<String>,
@@ -243,6 +244,36 @@ mod tests {
             relays: vec![],
         })
         .is_err());
+    }
+
+    #[test]
+    fn test_rejects_empty_private_key() {
+        let result = NostrStrategy::new(NostrCredentials {
+            private_key: "".to_string(),
+            relays: vec!["wss://relay.damus.io".to_string()],
+        });
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("private_key is required"),
+            "Expected private_key validation error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_rejects_empty_relays() {
+        let result = NostrStrategy::new(NostrCredentials {
+            private_key: "some_hex_key".to_string(),
+            relays: vec![],
+        });
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("at least one relay"),
+            "Expected relay validation error, got: {}",
+            err
+        );
     }
 
     #[test]

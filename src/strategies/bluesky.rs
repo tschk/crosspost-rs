@@ -16,6 +16,7 @@ pub struct BlueskyStrategy {
     credentials: BlueskyCredentials,
     host: String,
     cached_session: RwLock<Option<CachedSession>>,
+    api_base_override: Option<String>,
 }
 
 struct CachedSession {
@@ -54,6 +55,7 @@ impl BlueskyStrategy {
             credentials,
             host,
             cached_session: RwLock::new(None),
+            api_base_override: None,
         })
     }
 
@@ -66,6 +68,22 @@ impl BlueskyStrategy {
             password: required_env("BLUESKY_PASSWORD")?,
             host: optional_env("BLUESKY_HOST"),
         })
+    }
+
+    /// Override the API base URL for testing purposes.
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base_override = Some(base);
+        self
+    }
+
+    /// Build a full API URL for the given endpoint path.
+    fn api_url(&self, endpoint: &str) -> String {
+        if let Some(ref base) = self.api_base_override {
+            format!("{}{}", base, endpoint)
+        } else {
+            format!("https://{}{}", self.host, endpoint)
+        }
     }
 
     /// Get a cached session or create a new one if expired/missing.
@@ -103,10 +121,7 @@ impl BlueskyStrategy {
 
         let response = self
             .client
-            .post(format!(
-                "https://{}/xrpc/com.atproto.server.createSession",
-                self.host
-            ))
+            .post(self.api_url("/xrpc/com.atproto.server.createSession"))
             .json(&body)
             .send()
             .await
@@ -132,10 +147,7 @@ impl BlueskyStrategy {
     async fn upload_blob(&self, jwt: &str, data: &[u8], mime_type: &str) -> Result<BlobRef> {
         let response = self
             .client
-            .post(format!(
-                "https://{}/xrpc/com.atproto.repo.uploadBlob",
-                self.host
-            ))
+            .post(self.api_url("/xrpc/com.atproto.repo.uploadBlob"))
             .bearer_auth(jwt)
             .header("Content-Type", mime_type)
             .body(data.to_vec())
@@ -452,10 +464,7 @@ impl Strategy for BlueskyStrategy {
 
         let response = self
             .client
-            .post(format!(
-                "https://{}/xrpc/com.atproto.repo.createRecord",
-                self.host
-            ))
+            .post(self.api_url("/xrpc/com.atproto.repo.createRecord"))
             .bearer_auth(&session.access_jwt)
             .json(&body)
             .send()
@@ -503,6 +512,109 @@ impl Strategy for BlueskyStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy(base_url: &str) -> BlueskyStrategy {
+        BlueskyStrategy::new(BlueskyCredentials {
+            identifier: "test.bsky.social".to_string(),
+            password: "app-password".to_string(),
+            host: None,
+        })
+        .unwrap()
+        .with_api_base(base_url.to_string())
+    }
+
+    fn session_response() -> serde_json::Value {
+        serde_json::json!({
+            "accessJwt": "jwt123",
+            "did": "did:plc:abc",
+            "handle": "test.bsky.social"
+        })
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.server.createSession"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(session_response()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "uri": "at://did:plc:abc/app.bsky.feed.post/3k",
+                "cid": "baf123"
+            })))
+            .mount(&server)
+            .await;
+
+        let strategy = test_strategy(&server.uri());
+        let response = strategy.post("Hello Bluesky!", None).await.unwrap();
+
+        assert_eq!(response.id, "at://did:plc:abc/app.bsky.feed.post/3k");
+        assert_eq!(
+            response.url.unwrap(),
+            "https://bsky.app/profile/test.bsky.social/post/3k"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.server.createSession"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(session_response()))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.repo.createRecord"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&server)
+            .await;
+
+        let strategy = test_strategy(&server.uri());
+        let result = strategy.post("Hello!", None).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Bluesky post failed"), "Got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.server.createSession"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(session_response()))
+            .mount(&server)
+            .await;
+
+        let strategy = test_strategy(&server.uri());
+        let valid = strategy.validate_credentials().await.unwrap();
+        assert!(valid);
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/xrpc/com.atproto.server.createSession"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
+            .mount(&server)
+            .await;
+
+        let strategy = test_strategy(&server.uri());
+        let valid = strategy.validate_credentials().await.unwrap();
+        assert!(!valid);
+    }
 
     #[test]
     fn test_new_validates_credentials() {

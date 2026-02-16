@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub struct FacebookStrategy {
     client: reqwest::Client,
     credentials: FacebookCredentials,
+    api_base: String,
 }
 
 impl FacebookStrategy {
@@ -25,7 +26,14 @@ impl FacebookStrategy {
                 .build()
                 .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://graph.facebook.com/v18.0".to_string(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -52,7 +60,7 @@ impl FacebookStrategy {
 
             let response = self
                 .client
-                .post("https://graph.facebook.com/v18.0/me/photos")
+                .post(format!("{}/me/photos", self.api_base))
                 .bearer_auth(&self.credentials.access_token)
                 .multipart(form)
                 .send()
@@ -94,7 +102,7 @@ impl FacebookStrategy {
 
             let response = self
                 .client
-                .post("https://graph.facebook.com/v18.0/me/photos")
+                .post(format!("{}/me/photos", self.api_base))
                 .bearer_auth(&self.credentials.access_token)
                 .multipart(form)
                 .send()
@@ -130,7 +138,7 @@ impl FacebookStrategy {
 
         let response = self
             .client
-            .post("https://graph.facebook.com/v18.0/me/feed")
+            .post(format!("{}/me/feed", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .query(&query_params)
             .send()
@@ -191,8 +199,8 @@ impl Strategy for FacebookStrategy {
 
         let response = self
             .client
-            .post("https://graph.facebook.com/v18.0/me/feed")
-            .query(&[("access_token", &self.credentials.access_token)])
+            .post(format!("{}/me/feed", self.api_base))
+            .bearer_auth(&self.credentials.access_token)
             .json(&body)
             .send()
             .await
@@ -223,8 +231,8 @@ impl Strategy for FacebookStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://graph.facebook.com/v18.0/me")
-            .query(&[("access_token", &self.credentials.access_token)])
+            .get(format!("{}/me", self.api_base))
+            .bearer_auth(&self.credentials.access_token)
             .send()
             .await
             .map_err(|e| Error::Platform(format!("Facebook API error: {}", e)))?;
@@ -236,6 +244,16 @@ impl Strategy for FacebookStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> FacebookStrategy {
+        FacebookStrategy::new(FacebookCredentials {
+            access_token: "test-token".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -259,5 +277,69 @@ mod tests {
         assert_eq!(s.id(), "facebook");
         assert_eq!(s.name(), "Facebook");
         assert_eq!(s.max_message_length(), 63206);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/me/feed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "12345_67890"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let response = strategy.post("Hello Facebook!", None).await.unwrap();
+        assert_eq!(response.id, "12345_67890");
+        assert_eq!(
+            response.url,
+            Some("https://facebook.com/12345_67890".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/me/feed"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello!", None).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Facebook API error"), "Got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/me"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "123"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/me"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub struct RedditStrategy {
     client: reqwest::Client,
     credentials: RedditCredentials,
+    api_base: String,
 }
 
 impl RedditStrategy {
@@ -26,7 +27,14 @@ impl RedditStrategy {
                 .build()
                 .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://oauth.reddit.com".to_string(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -80,7 +88,7 @@ impl Strategy for RedditStrategy {
             // Post to user profile
             let me_response = self
                 .client
-                .get("https://oauth.reddit.com/api/v1/me")
+                .get(format!("{}/api/v1/me", self.api_base))
                 .bearer_auth(&self.credentials.access_token)
                 .send()
                 .await
@@ -112,7 +120,7 @@ impl Strategy for RedditStrategy {
 
         let response = self
             .client
-            .post("https://oauth.reddit.com/api/submit")
+            .post(format!("{}/api/submit", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .form(&params)
             .send()
@@ -153,7 +161,7 @@ impl Strategy for RedditStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://oauth.reddit.com/api/v1/me")
+            .get(format!("{}/api/v1/me", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .send()
             .await
@@ -166,6 +174,17 @@ impl Strategy for RedditStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> RedditStrategy {
+        RedditStrategy::new(RedditCredentials {
+            access_token: "test-token".to_string(),
+            subreddit: Some("test_sub".to_string()),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -192,5 +211,83 @@ mod tests {
         assert_eq!(s.id(), "reddit");
         assert_eq!(s.name(), "Reddit");
         assert_eq!(s.max_message_length(), 40000);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/submit"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "json": {
+                    "data": {
+                        "url": "https://reddit.com/r/test/123",
+                        "name": "t3_abc"
+                    },
+                    "errors": []
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello Reddit!", None).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.id, "t3_abc");
+        assert_eq!(
+            response.url,
+            Some("https://reddit.com/r/test/123".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/submit"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello Reddit!", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/me"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"name": "testuser"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.validate_credentials().await;
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/me"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.validate_credentials().await;
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
     }
 }

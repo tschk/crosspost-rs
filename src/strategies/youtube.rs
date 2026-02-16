@@ -8,6 +8,7 @@ use serde::Deserialize;
 pub struct YouTubeStrategy {
     client: reqwest::Client,
     credentials: YouTubeCredentials,
+    api_base: String,
 }
 
 impl YouTubeStrategy {
@@ -23,7 +24,14 @@ impl YouTubeStrategy {
                 .build()
                 .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://www.googleapis.com".to_string(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -61,7 +69,7 @@ impl Strategy for YouTubeStrategy {
         // Get channel ID
         let channel_response = self
             .client
-            .get("https://www.googleapis.com/youtube/v3/channels")
+            .get(format!("{}/youtube/v3/channels", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .query(&[("part", "id"), ("mine", "true")])
             .send()
@@ -100,7 +108,7 @@ impl Strategy for YouTubeStrategy {
 
         let response = self
             .client
-            .post("https://www.googleapis.com/youtube/v3/activities")
+            .post(format!("{}/youtube/v3/activities", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .query(&[("part", "snippet")])
             .json(&body)
@@ -141,7 +149,7 @@ impl Strategy for YouTubeStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://www.googleapis.com/youtube/v3/channels")
+            .get(format!("{}/youtube/v3/channels", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .query(&[("part", "id"), ("mine", "true")])
             .send()
@@ -155,6 +163,16 @@ impl Strategy for YouTubeStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> YouTubeStrategy {
+        YouTubeStrategy::new(YouTubeCredentials {
+            access_token: "test-token".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -178,5 +196,96 @@ mod tests {
         assert_eq!(s.id(), "youtube");
         assert_eq!(s.name(), "YouTube");
         assert_eq!(s.max_message_length(), 5000);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/youtube/v3/channels"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"items": [{"id": "UC123"}]})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/youtube/v3/activities"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "post456"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello YouTube!", None).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.id, "post456");
+        assert_eq!(
+            response.url,
+            Some("https://www.youtube.com/channel/UC123/community?lb=post456".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/youtube/v3/channels"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"items": [{"id": "UC123"}]})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/youtube/v3/activities"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello YouTube!", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/youtube/v3/channels"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"items": [{"id": "UC123"}]})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.validate_credentials().await;
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/youtube/v3/channels"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.validate_credentials().await;
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
     }
 }

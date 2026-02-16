@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub struct DiscordWebhookStrategy {
     client: reqwest::Client,
     credentials: DiscordWebhookCredentials,
+    api_base: Option<String>,
 }
 
 impl DiscordWebhookStrategy {
@@ -28,7 +29,14 @@ impl DiscordWebhookStrategy {
                 .build()
                 .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: None,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = Some(base);
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -85,7 +93,11 @@ impl Strategy for DiscordWebhookStrategy {
     }
 
     async fn post(&self, message: &str, options: Option<&PostOptions>) -> Result<PostResponse> {
-        let url = format!("{}?wait=true", self.credentials.webhook_url);
+        let url = if let Some(ref base) = self.api_base {
+            format!("{}?wait=true", base)
+        } else {
+            format!("{}?wait=true", self.credentials.webhook_url)
+        };
 
         let images = get_images(options);
         if !images.is_empty() {
@@ -136,9 +148,13 @@ impl Strategy for DiscordWebhookStrategy {
     }
 
     async fn validate_credentials(&self) -> Result<bool> {
+        let url = self
+            .api_base
+            .as_deref()
+            .unwrap_or(&self.credentials.webhook_url);
         let response = self
             .client
-            .get(&self.credentials.webhook_url)
+            .get(url)
             .send()
             .await
             .map_err(|e| Error::Platform(format!("Discord webhook error: {}", e)))?;
@@ -150,6 +166,16 @@ impl Strategy for DiscordWebhookStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> DiscordWebhookStrategy {
+        DiscordWebhookStrategy::new(DiscordWebhookCredentials {
+            webhook_url: "https://discord.com/api/webhooks/123/abc".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -173,5 +199,68 @@ mod tests {
         assert_eq!(s.id(), "discord_webhook");
         assert_eq!(s.name(), "Discord Webhook");
         assert_eq!(s.max_message_length(), 2000);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"id": "msg123", "channel_id": "ch456"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let response = strategy.post("Hello Discord!", None).await.unwrap();
+        assert_eq!(response.id, "msg123");
+        assert_eq!(
+            response.url,
+            Some("https://discord.com/channels/@me/ch456".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello!", None).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Discord webhook error"), "Got: {}", err);
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

@@ -8,6 +8,7 @@ use serde::Deserialize;
 pub struct TikTokStrategy {
     client: reqwest::Client,
     credentials: TikTokCredentials,
+    api_base: String,
 }
 
 impl TikTokStrategy {
@@ -23,7 +24,14 @@ impl TikTokStrategy {
                 .build()
                 .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://open.tiktokapis.com".to_string(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -73,7 +81,7 @@ impl Strategy for TikTokStrategy {
 
         let response = self
             .client
-            .post("https://open.tiktokapis.com/v2/post/publish/content/init/")
+            .post(format!("{}/v2/post/publish/content/init/", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .header("Content-Type", "application/json; charset=UTF-8")
             .json(&body)
@@ -103,7 +111,7 @@ impl Strategy for TikTokStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://open.tiktokapis.com/v2/user/info/")
+            .get(format!("{}/v2/user/info/", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .query(&[("fields", "open_id")])
             .send()
@@ -117,6 +125,16 @@ impl Strategy for TikTokStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> TikTokStrategy {
+        TikTokStrategy::new(TikTokCredentials {
+            access_token: "test-token".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -140,5 +158,66 @@ mod tests {
         assert_eq!(s.id(), "tiktok");
         assert_eq!(s.name(), "TikTok");
         assert_eq!(s.max_message_length(), 2200);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/post/publish/content/init/"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data":{"publish_id":"pub123"}})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let response = strategy.post("Hello TikTok", None).await.unwrap();
+        assert_eq!(response.id, "pub123");
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v2/post/publish/content/init/"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello TikTok", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/user/info/"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/user/info/"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

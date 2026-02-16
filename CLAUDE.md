@@ -13,8 +13,8 @@ Crosspost-RS is a Rust library for cross-posting content to 16 social media plat
 cargo check                                          # Check library compilation
 cargo build --release                                # Build library release
 cargo build --features server                        # Build with server
-cargo test                                           # Run library tests (38 tests)
-cargo test --features server                         # Run all tests (61 tests)
+cargo test                                           # Run library tests (118 tests)
+cargo test --features server                         # Run all tests (141 tests)
 cargo clippy --all-targets -- -D warnings            # Lint library
 cargo clippy --all-targets --features server -- -D warnings  # Lint everything
 cargo fmt --all -- --check                           # Format check

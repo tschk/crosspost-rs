@@ -8,6 +8,7 @@ use serde::Deserialize;
 pub struct TwitchStrategy {
     client: reqwest::Client,
     credentials: TwitchCredentials,
+    api_base: String,
 }
 
 impl TwitchStrategy {
@@ -28,7 +29,14 @@ impl TwitchStrategy {
                 .build()
                 .map_err(|e| Error::Platform(format!("Failed to build HTTP client: {}", e)))?,
             credentials,
+            api_base: "https://api.twitch.tv".to_string(),
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_api_base(mut self, base: String) -> Self {
+        self.api_base = base;
+        self
     }
 
     pub fn from_env() -> Result<Self> {
@@ -67,7 +75,7 @@ impl Strategy for TwitchStrategy {
         // Get broadcaster's user ID
         let user_response = self
             .client
-            .get("https://api.twitch.tv/helix/users")
+            .get(format!("{}/helix/users", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .header("Client-Id", &self.credentials.client_id)
             .send()
@@ -100,7 +108,7 @@ impl Strategy for TwitchStrategy {
 
         let response = self
             .client
-            .post("https://api.twitch.tv/helix/chat/announcements")
+            .post(format!("{}/helix/chat/announcements", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .header("Client-Id", &self.credentials.client_id)
             .query(&[
@@ -129,7 +137,7 @@ impl Strategy for TwitchStrategy {
     async fn validate_credentials(&self) -> Result<bool> {
         let response = self
             .client
-            .get("https://api.twitch.tv/helix/users")
+            .get(format!("{}/helix/users", self.api_base))
             .bearer_auth(&self.credentials.access_token)
             .header("Client-Id", &self.credentials.client_id)
             .send()
@@ -143,6 +151,17 @@ impl Strategy for TwitchStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Strategy;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_strategy() -> TwitchStrategy {
+        TwitchStrategy::new(TwitchCredentials {
+            access_token: "test-token".to_string(),
+            client_id: "test-client".to_string(),
+        })
+        .unwrap()
+    }
 
     #[test]
     fn test_new_validates_credentials() {
@@ -175,5 +194,84 @@ mod tests {
         assert_eq!(s.id(), "twitch");
         assert_eq!(s.name(), "Twitch");
         assert_eq!(s.max_message_length(), 500);
+    }
+
+    #[tokio::test]
+    async fn test_post_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/helix/users"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data":[{"id":"user123"}]})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/helix/chat/announcements"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let response = strategy.post("Hello Twitch", None).await.unwrap();
+        assert!(response.id.starts_with("announcement_"));
+        assert_eq!(response.url, Some("https://twitch.tv/user123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_post_api_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/helix/users"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"data":[{"id":"user123"}]})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/helix/chat/announcements"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let result = strategy.post("Hello Twitch", None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/helix/users"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"data":[{"id":"u1"}]})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(strategy.validate_credentials().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_validate_credentials_failure() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/helix/users"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        assert!(!strategy.validate_credentials().await.unwrap());
     }
 }

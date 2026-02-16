@@ -112,7 +112,7 @@ oauth2 = { version = "4.4", optional = true }
 governor = { version = "0.7", optional = true }
 
 # Validation
-validator = { version = "0.18", features = ["derive"], optional = true }
+validator = { version = "0.20", features = ["derive"], optional = true }
 
 # Tracing subscriber (server init)
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }

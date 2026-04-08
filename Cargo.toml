@@ -1,0 +1,131 @@
+[package]
+name = "crosspost"
+version = "0.1.0"
+edition = "2021"
+authors = ["Crosspost Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/GraftAI-com/crosspost-rs"
+description = "Cross-post messages to multiple social media platforms"
+
+[features]
+default = ["nostr", "image-compression"]
+nostr = [
+    "dep:secp256k1",
+    "dep:sha2",
+    "dep:hex",
+    "dep:bech32",
+    "dep:tokio-tungstenite",
+    "dep:futures-util",
+]
+image-compression = [
+    "dep:mozjpeg",
+    "dep:oxipng",
+]
+server = [
+    "nostr",
+    "image-compression",
+    "dep:axum",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:surrealdb",
+    "dep:argon2",
+    "dep:jsonwebtoken",
+    "dep:oauth2",
+    "dep:governor",
+    "dep:validator",
+    "dep:tracing-subscriber",
+    "dep:config",
+    "dep:anyhow",
+    "dep:dashmap",
+]
+
+[[bin]]
+name = "crosspost-server"
+path = "src/bin/server.rs"
+required-features = ["server"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.42", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging
+tracing = "0.1"
+
+# Async traits
+async-trait = "0.1"
+
+# Concurrency
+futures = "0.3"
+
+# Environment
+dotenvy = "0.15"
+
+# IDs
+uuid = { version = "1.11", features = ["v4", "serde"] }
+
+# Image support
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+infer = "0.16"
+base64 = "0.22"
+
+# Image compression (optional, behind "image-compression" feature)
+mozjpeg = { version = "0.10", optional = true }
+oxipng = { version = "9", optional = true }
+
+# Nostr support (optional, behind "nostr" feature)
+secp256k1 = { version = "0.29", features = ["global-context", "rand-std"], optional = true }
+sha2 = { version = "0.10", optional = true }
+hex = { version = "0.4", optional = true }
+bech32 = { version = "0.11", optional = true }
+tokio-tungstenite = { version = "0.24", features = ["native-tls"], optional = true }
+futures-util = { version = "0.3", optional = true }
+
+# --- Server-only dependencies (behind "server" feature) ---
+
+# Web framework
+axum = { version = "0.8", features = ["macros", "multipart"], optional = true }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "util", "set-header", "propagate-header"], optional = true }
+
+# Database
+surrealdb = { version = "2.2", features = ["kv-rocksdb"], optional = true }
+
+# Auth
+argon2 = { version = "0.5", optional = true }
+jsonwebtoken = { version = "9.3", optional = true }
+oauth2 = { version = "4.4", optional = true }
+
+# Rate limiting
+governor = { version = "0.7", optional = true }
+
+# Validation
+validator = { version = "0.20", features = ["derive"], optional = true }
+
+# Tracing subscriber (server init)
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+
+# Config
+config = { version = "0.14", optional = true }
+
+# Error handling (server)
+anyhow = { version = "1.0", optional = true }
+
+# Concurrent maps (governor dep)
+dashmap = { version = "6", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.42", features = ["test-util"] }
+wiremock = "0.6.5"

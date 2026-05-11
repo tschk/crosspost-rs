@@ -50,6 +50,7 @@ pub mod server;
 pub use client::Client;
 pub use error::{Error, Result};
 pub use strategy::{PostResponse, Strategy};
+pub use tokio_util::sync::CancellationToken;
 pub use types::{ImageEmbed, PostOptions, PostResult, PostToEntry};
 
 // Re-export all credential types

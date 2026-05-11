@@ -1,5 +1,6 @@
 use crate::strategy::Strategy;
 use crate::types::{PostOptions, PostResult, PostToEntry};
+use tokio_util::sync::CancellationToken;
 
 /// Client that orchestrates posting to multiple strategies concurrently.
 ///
@@ -47,13 +48,26 @@ impl Client {
     /// Each strategy is called independently - one failure does not affect others.
     /// Returns a `PostResult` for each strategy.
     pub async fn post(&self, message: &str, options: Option<&PostOptions>) -> Vec<PostResult> {
+        self.post_with_cancel(message, options, None).await
+    }
+
+    /// Like [`Client::post`], but aborts in-flight work when `cancel` is triggered.
+    ///
+    /// Each strategy future is cancelled cooperatively: the underlying HTTP request may
+    /// run until the runtime drops it after cancellation. Use [`CancellationToken::cancel`]
+    /// from another task or signal handler.
+    pub async fn post_with_cancel(
+        &self,
+        message: &str,
+        options: Option<&PostOptions>,
+        cancel: Option<&CancellationToken>,
+    ) -> Vec<PostResult> {
         let futures: Vec<_> = self
             .strategies
             .iter()
             .map(|strategy| {
                 let name = strategy.name().to_string();
                 async move {
-                    // Check message length first
                     let length = strategy.calculate_message_length(message);
                     let max = strategy.max_message_length();
                     if length > max {
@@ -66,8 +80,26 @@ impl Client {
                         };
                     }
 
-                    match strategy.post(message, options).await {
-                        Ok(response) => {
+                    let post_fut = strategy.post(message, options);
+                    let outcome = if let Some(ct) = cancel {
+                        tokio::select! {
+                            biased;
+                            () = ct.cancelled() => {
+                                Err("Post cancelled".to_string())
+                            }
+                            r = post_fut => Ok(r),
+                        }
+                    } else {
+                        Ok(post_fut.await)
+                    };
+
+                    match outcome {
+                        Err(reason) => PostResult::Failure { name, reason },
+                        Ok(Err(e)) => PostResult::Failure {
+                            name,
+                            reason: e.to_string(),
+                        },
+                        Ok(Ok(response)) => {
                             let url = strategy.get_url_from_response(&response);
                             PostResult::Success {
                                 name,
@@ -75,10 +107,6 @@ impl Client {
                                 url,
                             }
                         }
-                        Err(e) => PostResult::Failure {
-                            name,
-                            reason: e.to_string(),
-                        },
                     }
                 }
             })
@@ -92,6 +120,15 @@ impl Client {
     /// Only strategies whose IDs match entries in the input will be called.
     /// Unmatched entries produce a `Failure` result.
     pub async fn post_to(&self, entries: &[PostToEntry]) -> Vec<PostResult> {
+        self.post_to_with_cancel(entries, None).await
+    }
+
+    /// Like [`Client::post_to`], but aborts in-flight strategy posts when `cancel` is triggered.
+    pub async fn post_to_with_cancel(
+        &self,
+        entries: &[PostToEntry],
+        cancel: Option<&CancellationToken>,
+    ) -> Vec<PostResult> {
         let futures: Vec<_> = entries
             .iter()
             .map(|entry| {
@@ -113,7 +150,6 @@ impl Client {
 
                     let name = strategy.name().to_string();
 
-                    // Check message length
                     let length = strategy.calculate_message_length(&entry.message);
                     let max = strategy.max_message_length();
                     if length > max {
@@ -126,12 +162,30 @@ impl Client {
                         };
                     }
 
-                    let options = entry.images.as_ref().map(|images| PostOptions {
+                    let post_options = entry.images.as_ref().map(|images| PostOptions {
                         images: images.clone(),
                     });
 
-                    match strategy.post(&entry.message, options.as_ref()).await {
-                        Ok(response) => {
+                    let post_fut = strategy.post(&entry.message, post_options.as_ref());
+                    let outcome = if let Some(ct) = cancel {
+                        tokio::select! {
+                            biased;
+                            () = ct.cancelled() => {
+                                Err("Post cancelled".to_string())
+                            }
+                            r = post_fut => Ok(r),
+                        }
+                    } else {
+                        Ok(post_fut.await)
+                    };
+
+                    match outcome {
+                        Err(reason) => PostResult::Failure { name, reason },
+                        Ok(Err(e)) => PostResult::Failure {
+                            name,
+                            reason: e.to_string(),
+                        },
+                        Ok(Ok(response)) => {
                             let url = strategy.get_url_from_response(&response);
                             PostResult::Success {
                                 name,
@@ -139,10 +193,6 @@ impl Client {
                                 url,
                             }
                         }
-                        Err(e) => PostResult::Failure {
-                            name,
-                            reason: e.to_string(),
-                        },
                     }
                 }
             })
@@ -162,6 +212,7 @@ mod tests {
     use super::*;
     use crate::error::Error;
     use crate::strategy::PostResponse;
+    use std::time::Duration;
 
     /// A mock strategy for testing the Client orchestrator.
     struct MockStrategy {
@@ -169,6 +220,7 @@ mod tests {
         strategy_name: &'static str,
         max_length: usize,
         should_fail: bool,
+        delay_post: Option<Duration>,
     }
 
     impl MockStrategy {
@@ -178,6 +230,7 @@ mod tests {
                 strategy_name: name,
                 max_length: 280,
                 should_fail: false,
+                delay_post: None,
             }
         }
 
@@ -187,6 +240,17 @@ mod tests {
                 strategy_name: name,
                 max_length: 280,
                 should_fail: true,
+                delay_post: None,
+            }
+        }
+
+        fn slow(id: &'static str, name: &'static str, delay: Duration) -> Self {
+            Self {
+                strategy_id: id,
+                strategy_name: name,
+                max_length: 280,
+                should_fail: false,
+                delay_post: Some(delay),
             }
         }
     }
@@ -207,6 +271,9 @@ mod tests {
             _message: &str,
             _options: Option<&PostOptions>,
         ) -> crate::error::Result<PostResponse> {
+            if let Some(d) = self.delay_post {
+                tokio::time::sleep(d).await;
+            }
             if self.should_fail {
                 Err(Error::Platform("Mock API error".to_string()))
             } else {
@@ -244,6 +311,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_post_with_cancel_aborts() {
+        let client = Client::new(vec![Box::new(MockStrategy::slow(
+            "slow",
+            "Slow",
+            Duration::from_secs(30),
+        ))]);
+        let token = CancellationToken::new();
+        let child = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            child.cancel();
+        });
+
+        let results = client.post_with_cancel("Hello!", None, Some(&token)).await;
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            PostResult::Failure { reason, .. } => assert_eq!(reason, "Post cancelled"),
+            PostResult::Success { .. } => panic!("expected cancellation"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_post_to_with_cancel_aborts() {
+        let client = Client::new(vec![Box::new(MockStrategy::slow(
+            "slow",
+            "Slow",
+            Duration::from_secs(30),
+        ))]);
+        let token = CancellationToken::new();
+        let child = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            child.cancel();
+        });
+
+        let entries = vec![PostToEntry {
+            strategy_id: "slow".to_string(),
+            message: "Hi".to_string(),
+            images: None,
+        }];
+        let results = client.post_to_with_cancel(&entries, Some(&token)).await;
+        assert_eq!(results.len(), 1);
+        match &results[0] {
+            PostResult::Failure { reason, .. } => assert_eq!(reason, "Post cancelled"),
+            PostResult::Success { .. } => panic!("expected cancellation"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_post_error_isolation() {
         let client = Client::new(vec![
             Box::new(MockStrategy::success("good", "Good")),
@@ -274,7 +390,7 @@ mod tests {
     async fn test_post_message_too_long() {
         let client = Client::new(vec![Box::new(MockStrategy::success("short", "Short"))]);
 
-        let long_message = "x".repeat(300); // exceeds max_length of 280
+        let long_message = "x".repeat(300);
         let results = client.post(&long_message, None).await;
         assert_eq!(results.len(), 1);
 

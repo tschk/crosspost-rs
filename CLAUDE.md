@@ -101,8 +101,8 @@ src/
 - Never use `.unwrap()` in production code
 
 ### Error Handling
-- `crosspost::Error` variants: `Platform(String)`, `Validation(String)`, `Config(String)`, `MessageTooLong { platform, length, max }`
-- Map external errors with `.map_err(|e| Error::Platform(format!(...)))`
+- `crosspost::Error` variants: `Platform(String)`, `PlatformHttp { platform, status, details }`, `Validation(String)`, `Config(String)`, `MessageTooLong { platform, length, max }`
+- Map external errors with `.map_err(|e| Error::Platform(format!(...)))` or `Error::platform_http(...)` / `platform_response_error` for non-success HTTP responses
 - Use `?` with `.map_err()` for conversions
 
 ### Strategy Pattern

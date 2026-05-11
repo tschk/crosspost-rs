@@ -1,5 +1,5 @@
 use crate::env::{optional_env, required_env};
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{MastodonCredentials, PostOptions};
 use serde::Deserialize;
@@ -81,14 +81,7 @@ impl MastodonStrategy {
             .map_err(|e| Error::Platform(format!("Mastodon media upload error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Mastodon media upload failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let media: MastodonMediaAttachment = response
@@ -159,14 +152,7 @@ impl Strategy for MastodonStrategy {
             .map_err(|e| Error::Platform(format!("Mastodon API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Mastodon API error: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let status: MastodonStatus = response
@@ -296,10 +282,7 @@ mod tests {
 
         let result = strategy.post("Hello!", None).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Mastodon API error"));
+        assert!(result.unwrap_err().to_string().contains("HTTP 422"));
     }
 
     #[tokio::test]

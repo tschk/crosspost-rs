@@ -42,7 +42,7 @@
 | MIME type detection | YES | YES | Rust uses `infer` crate to detect MIME type from bytes |
 | Message length validation | YES | YES | Rust has per-platform `max_message_length()` implementation |
 | Post URL extraction | YES | PARTIAL | JS returns URL via `getUrlFromResponse()`; Rust returns `url: Option<String>` but many are None |
-| AbortSignal/cancellation | YES | NO | JS supports `AbortSignal` for cancelling in-flight posts |
+| AbortSignal/cancellation | YES | PARTIAL | JS `AbortSignal`; Rust `Client::post_with_cancel` / `post_to_with_cancel` with `CancellationToken` (cooperative; see docs) |
 | Strategy pattern (pluggable) | YES | YES | JS: `Client` + `Strategy` interface; Rust: `Platform` trait |
 | Per-message strategy targeting | YES | YES | JS: `postTo()` with `strategyId`; Rust: `account_ids` in request |
 | Error handling (per-platform) | YES | YES | JS: `SuccessResponse`/`FailureResponse` per platform; Rust: `PlatformPostResult` per account |
@@ -131,7 +131,7 @@ These are fundamentally different architectures. The JS approach is simpler for 
 ### Must have for parity
 1. **CLI binary** - JS has a CLI; Rust version is currently API-only.
 2. **MCP server mode** - JS supports Model Context Protocol; Rust does not.
-3. **AbortSignal equivalent** - Rust needs tokio CancellationToken integration for request cancellation.
+3. **AbortSignal equivalent** - `Client::post_with_cancel` / `post_to_with_cancel` accept `tokio_util::sync::CancellationToken` (re-exported as `crosspost::CancellationToken`).
 
 ### Nice to have for parity
 4. **Twitter media upload** - JS supports it, Rust does not.

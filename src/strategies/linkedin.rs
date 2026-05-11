@@ -1,5 +1,5 @@
 use crate::env::required_env;
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{LinkedInCredentials, PostOptions};
 use serde::{Deserialize, Serialize};
@@ -81,18 +81,14 @@ impl LinkedInStrategy {
             .map_err(|e| Error::Platform(format!("LinkedIn image init error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "LinkedIn image init failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let parsed: LinkedInInitializeUploadResponse = response.json().await.map_err(|e| {
-            Error::Platform(format!("Failed to parse LinkedIn image init response: {}", e))
+            Error::Platform(format!(
+                "Failed to parse LinkedIn image init response: {}",
+                e
+            ))
         })?;
 
         Ok(parsed.value)
@@ -110,14 +106,7 @@ impl LinkedInStrategy {
             .map_err(|e| Error::Platform(format!("LinkedIn upload error: {}", e)))?;
 
         if !upload_resp.status().is_success() {
-            let error_text = upload_resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "LinkedIn image upload failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), upload_resp).await);
         }
 
         Ok(())
@@ -163,7 +152,9 @@ struct LinkedInDistribution {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum LinkedInPostContent {
-    SingleImage { media: LinkedInSingleImage },
+    SingleImage {
+        media: LinkedInSingleImage,
+    },
     MultiImage {
         #[serde(rename = "multiImage")]
         multi_image: LinkedInMultiImageBlock,
@@ -218,14 +209,7 @@ impl Strategy for LinkedInStrategy {
             .map_err(|e| Error::Platform(format!("LinkedIn API error: {}", e)))?;
 
         if !profile.status().is_success() {
-            let error_text = profile
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "LinkedIn profile fetch error: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), profile).await);
         }
 
         let profile_data: LinkedInProfileResponse = profile
@@ -293,14 +277,7 @@ impl Strategy for LinkedInStrategy {
             .map_err(|e| Error::Platform(format!("LinkedIn API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "LinkedIn API error: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let post_id = response
@@ -309,17 +286,12 @@ impl Strategy for LinkedInStrategy {
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string())
             .ok_or_else(|| {
-                Error::Platform(
-                    "LinkedIn post response missing x-restli-id header".to_string(),
-                )
+                Error::Platform("LinkedIn post response missing x-restli-id header".to_string())
             })?;
 
         Ok(PostResponse {
             id: post_id.clone(),
-            url: Some(format!(
-                "https://www.linkedin.com/feed/update/{}",
-                post_id
-            )),
+            url: Some(format!("https://www.linkedin.com/feed/update/{}", post_id)),
         })
     }
 
@@ -465,10 +437,7 @@ mod tests {
             }],
         };
 
-        let result = strategy
-            .post("Hello with pic", Some(&opts))
-            .await
-            .unwrap();
+        let result = strategy.post("Hello with pic", Some(&opts)).await.unwrap();
         assert_eq!(result.id, "urn:li:share:777");
     }
 
@@ -573,10 +542,7 @@ mod tests {
 
         let result = strategy.post("Hello!", None).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("LinkedIn API error"));
+        assert!(result.unwrap_err().to_string().contains("HTTP 422"));
     }
 
     #[tokio::test]
@@ -601,11 +567,7 @@ mod tests {
 
         let strategy = test_strategy().with_api_base(mock_server.uri());
         let err = strategy.post("Hello!", None).await.unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("missing x-restli-id"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("missing x-restli-id"), "{err}");
     }
 
     #[tokio::test]

@@ -1,5 +1,5 @@
 use crate::env::{optional_env, required_env};
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{BlueskyCredentials, PostOptions};
 use serde::{Deserialize, Serialize};
@@ -128,14 +128,7 @@ impl BlueskyStrategy {
             .map_err(|e| Error::Platform(format!("Bluesky API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Bluesky login failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         response
@@ -156,14 +149,7 @@ impl BlueskyStrategy {
             .map_err(|e| Error::Platform(format!("Bluesky blob upload error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Bluesky blob upload failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let blob_response: UploadBlobResponse = response
@@ -472,14 +458,7 @@ impl Strategy for BlueskyStrategy {
             .map_err(|e| Error::Platform(format!("Bluesky API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Bluesky post failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let record_response: CreateRecordResponse = response
@@ -583,7 +562,7 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("Bluesky post failed"), "Got: {}", err);
+        assert!(err.contains("HTTP 403"), "Got: {}", err);
     }
 
     #[tokio::test]

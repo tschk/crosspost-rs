@@ -1,5 +1,5 @@
 use crate::env::required_env;
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{FacebookCredentials, PostOptions};
 use serde::Deserialize;
@@ -68,14 +68,7 @@ impl FacebookStrategy {
                 .map_err(|e| Error::Platform(format!("Facebook photo upload error: {}", e)))?;
 
             if !response.status().is_success() {
-                let error_text = response
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| "Unknown error".to_string());
-                return Err(Error::Platform(format!(
-                    "Facebook photo upload failed: {}",
-                    error_text
-                )));
+                return Err(platform_response_error(self.name(), response).await);
             }
 
             let fb_response: FacebookPostResponse = response.json().await.map_err(|e| {
@@ -110,14 +103,7 @@ impl FacebookStrategy {
                 .map_err(|e| Error::Platform(format!("Facebook photo upload error: {}", e)))?;
 
             if !response.status().is_success() {
-                let error_text = response
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| "Unknown error".to_string());
-                return Err(Error::Platform(format!(
-                    "Facebook photo upload failed: {}",
-                    error_text
-                )));
+                return Err(platform_response_error(self.name(), response).await);
             }
 
             let fb_response: FacebookPostResponse = response.json().await.map_err(|e| {
@@ -146,14 +132,7 @@ impl FacebookStrategy {
             .map_err(|e| Error::Platform(format!("Facebook API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Facebook API error: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let fb_response: FacebookPostResponse = response
@@ -207,14 +186,7 @@ impl Strategy for FacebookStrategy {
             .map_err(|e| Error::Platform(format!("Facebook API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Facebook API error: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let fb_response: FacebookPostResponse = response
@@ -312,7 +284,7 @@ mod tests {
         let result = strategy.post("Hello!", None).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("Facebook API error"), "Got: {}", err);
+        assert!(err.contains("HTTP 403"), "Got: {}", err);
     }
 
     #[tokio::test]

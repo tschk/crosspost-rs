@@ -1,10 +1,10 @@
 [package]
 name = "crosspost"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
-authors = ["Crosspost Contributors"]
+authors = ["Max Carter <undivisible@vk.com>"]
 license = "MPL-2.0"
-repository = "https://github.com/GraftAI-com/crosspost-rs"
+repository = "https://github.com/tschk/crosspost-rs"
 description = "Cross-post messages to multiple social media platforms"
 
 [features]
@@ -47,6 +47,7 @@ required-features = ["server"]
 [dependencies]
 # Async runtime
 tokio = { version = "1.42", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "multipart"] }

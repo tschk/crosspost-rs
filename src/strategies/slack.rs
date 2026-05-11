@@ -1,5 +1,5 @@
 use crate::env::{optional_env, required_env};
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{PostOptions, SlackCredentials};
 use serde::Deserialize;
@@ -168,11 +168,7 @@ impl Strategy for SlackStrategy {
             .map_err(|e| Error::Platform(format!("Slack API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!("Slack API error: {}", error_text)));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let slack_response: SlackPostResponse = response

@@ -1,5 +1,5 @@
 use crate::env::required_env;
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{DiscordCredentials, PostOptions};
 use serde::Deserialize;
@@ -51,14 +51,7 @@ impl DiscordStrategy {
 
     async fn handle_response(&self, response: reqwest::Response) -> Result<PostResponse> {
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Discord API error: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let msg: DiscordMessage = response
@@ -272,10 +265,7 @@ mod tests {
 
         let result = strategy.post("Hello!", None).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Discord API error"));
+        assert!(result.unwrap_err().to_string().contains("HTTP 403"));
     }
 
     #[tokio::test]

@@ -137,7 +137,7 @@ impl_redacted_debug!(DiscordCredentials {
 /// Credentials for Discord webhook posting.
 #[derive(Clone)]
 pub struct DiscordWebhookCredentials {
-    /// Full webhook URL (e.g., "https://discord.com/api/webhooks/...").
+    /// Full webhook URL (e.g. `<https://discord.com/api/webhooks/...>`).
     pub webhook_url: String,
 }
 impl_redacted_debug!(DiscordWebhookCredentials {

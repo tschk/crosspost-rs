@@ -1,5 +1,5 @@
 use crate::env::required_env;
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{PostResponse, Strategy};
 use crate::types::{PostOptions, TwitchCredentials};
 use serde::Deserialize;
@@ -83,11 +83,7 @@ impl Strategy for TwitchStrategy {
             .map_err(|e| Error::Platform(format!("Twitch API error: {}", e)))?;
 
         if !user_response.status().is_success() {
-            let error_text = user_response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!("Twitch API error: {}", error_text)));
+            return Err(platform_response_error(self.name(), user_response).await);
         }
 
         let users: TwitchUserResponse = user_response
@@ -121,11 +117,7 @@ impl Strategy for TwitchStrategy {
             .map_err(|e| Error::Platform(format!("Twitch API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!("Twitch API error: {}", error_text)));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         Ok(PostResponse {

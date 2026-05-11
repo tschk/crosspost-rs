@@ -1,5 +1,5 @@
 use crate::env::required_env;
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{PostResponse, Strategy};
 use crate::types::{PostOptions, TikTokCredentials};
 use serde::Deserialize;
@@ -90,11 +90,7 @@ impl Strategy for TikTokStrategy {
             .map_err(|e| Error::Platform(format!("TikTok API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!("TikTok API error: {}", error_text)));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let tiktok_response: TikTokPostResponse = response

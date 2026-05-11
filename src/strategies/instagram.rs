@@ -1,5 +1,5 @@
 use crate::env::required_env;
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{InstagramCredentials, PostOptions};
 use serde::Deserialize;
@@ -60,14 +60,7 @@ impl InstagramStrategy {
             .map_err(|e| Error::Platform(format!("Instagram API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Instagram container creation failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let container: InstagramPostResponse = response
@@ -90,14 +83,7 @@ impl InstagramStrategy {
             .map_err(|e| Error::Platform(format!("Instagram API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Instagram publish failed: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let published: InstagramPostResponse = response
@@ -176,14 +162,7 @@ impl Strategy for InstagramStrategy {
                     .map_err(|e| Error::Platform(format!("Instagram API error: {}", e)))?;
 
                 if !response.status().is_success() {
-                    let error_text = response
-                        .text()
-                        .await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-                    return Err(Error::Platform(format!(
-                        "Instagram carousel item creation failed: {}",
-                        error_text
-                    )));
+                    return Err(platform_response_error(self.name(), response).await);
                 }
 
                 let child: InstagramPostResponse = response.json().await.map_err(|e| {

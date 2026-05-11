@@ -1,5 +1,5 @@
 use crate::env::optional_env;
-use crate::error::{Error, Result};
+use crate::error::{platform_response_error, Error, Result};
 use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{PostOptions, TwitterCredentials};
 use base64::Engine;
@@ -137,14 +137,7 @@ impl Strategy for TwitterStrategy {
                     .map_err(|e| Error::Platform(format!("Twitter media upload error: {}", e)))?;
 
                 if !upload_resp.status().is_success() {
-                    let error_text = upload_resp
-                        .text()
-                        .await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-                    return Err(Error::Platform(format!(
-                        "Twitter media upload failed: {}",
-                        error_text
-                    )));
+                    return Err(platform_response_error(self.name(), upload_resp).await);
                 }
 
                 let media_resp: TwitterMediaUploadResponse =
@@ -178,14 +171,7 @@ impl Strategy for TwitterStrategy {
             .map_err(|e| Error::Platform(format!("Twitter API error: {}", e)))?;
 
         if !response.status().is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(Error::Platform(format!(
-                "Twitter API error: {}",
-                error_text
-            )));
+            return Err(platform_response_error(self.name(), response).await);
         }
 
         let twitter_response: TwitterPostResponse = response
@@ -305,10 +291,7 @@ mod tests {
 
         let result = strategy.post("Hello!", None).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Twitter API error"));
+        assert!(result.unwrap_err().to_string().contains("HTTP 403"));
     }
 
     #[tokio::test]

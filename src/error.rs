@@ -7,6 +7,17 @@ pub enum Error {
     #[error("Platform error: {0}")]
     Platform(String),
 
+    /// A non-success HTTP response from a platform API.
+    #[error("{platform}: HTTP {status}: {details}")]
+    PlatformHttp {
+        /// Platform display name (e.g. "Bluesky").
+        platform: String,
+        /// HTTP status code.
+        status: u16,
+        /// Response body or other detail text.
+        details: String,
+    },
+
     /// A validation error (e.g., invalid image type, too many images).
     #[error("Validation error: {0}")]
     Validation(String),
@@ -25,6 +36,31 @@ pub enum Error {
         /// Platform's maximum allowed length.
         max: usize,
     },
+}
+
+impl Error {
+    /// Build a [`Error::PlatformHttp`] from a display name and HTTP status.
+    pub fn platform_http(
+        platform: impl Into<String>,
+        status: reqwest::StatusCode,
+        details: impl Into<String>,
+    ) -> Self {
+        Error::PlatformHttp {
+            platform: platform.into(),
+            status: status.as_u16(),
+            details: details.into(),
+        }
+    }
+}
+
+/// Map a failed HTTP [`reqwest::Response`] to [`Error::PlatformHttp`] after reading the body.
+pub(crate) async fn platform_response_error(platform: &str, response: reqwest::Response) -> Error {
+    let status = response.status();
+    let details = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "Unknown error".to_string());
+    Error::platform_http(platform, status, details)
 }
 
 /// A specialized `Result` type for crosspost operations.

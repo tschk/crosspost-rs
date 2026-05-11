@@ -1,9 +1,9 @@
 [package]
 name = "crosspost"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Crosspost Contributors"]
-license = "Apache-2.0"
+license = "MPL-2.0"
 repository = "https://github.com/GraftAI-com/crosspost-rs"
 description = "Cross-post messages to multiple social media platforms"
 

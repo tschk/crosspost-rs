@@ -4,7 +4,7 @@
 
 A Rust rewrite and expansion of the [`@humanwhocodes/crosspost`](https://github.com/humanwhocodes/crosspost) JavaScript library. Supports 16 platforms with typed credentials, concurrent posting, and per-platform error isolation.
 
-[![License](https://img.shields.io/badge/license-Polyform%20Shield%201.0-blue.svg)](LICENSE)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.83%2B-orange.svg)](https://www.rust-lang.org)
 
 ---
@@ -214,7 +214,7 @@ cargo fmt --all -- --check                           # Format check
 
 ## License
 
-Polyform Shield 1.0.0 - See [LICENSE](LICENSE) for details.
+This project is licensed under the [Mozilla Public License 2.0](https://www.mozilla.org/MPL/2.0/). See [LICENSE](LICENSE).
 
 ## Acknowledgments
 

@@ -1,7 +1,7 @@
 # Feature Parity: Original JS vs Rust Rewrite
 
-**Original:** `@humanwhocodes/crosspost` v1.0.3 (JavaScript, Apache-2.0)
-**Rewrite:** `crosspost-rs` (Rust, Polyform Shield 1.0.0)
+**Original:** `@humanwhocodes/crosspost` v1.0.4 (JavaScript, Apache-2.0)
+**Rewrite:** `crosspost-rs` (Rust, MPL-2.0)
 **Date:** 2026-02-16
 
 ---
@@ -13,7 +13,7 @@
 | Twitter/X | YES | YES | Both use API v2. JS uses `twitter-api-v2` npm package; Rust uses raw reqwest |
 | Bluesky | YES | YES | Rust matches JS with full AT Protocol support (facets, blob upload, aspect ratios) |
 | Mastodon | YES | YES | Rust supports media upload (up to 4) and custom instances via `token|host` |
-| LinkedIn | YES | YES | JS uses access token directly; Rust uses OAuth2 flow. Neither handles media |
+| LinkedIn | YES | YES | Both use `/rest/posts` + `LinkedIn-Version: 202604` (v1.0.4+ JS). Rust library uses bearer token; server uses OAuth2 |
 | Discord (Bot) | YES | YES | Rust supports bot token + channel posting + image upload |
 | Discord (Webhook) | YES | YES | Rust supports webhook URL posting + image upload |
 | Telegram | YES | YES | Both use Bot API. Rust uses HTML parse mode and supports photo upload |

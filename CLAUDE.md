@@ -5,7 +5,7 @@
 Crosspost-RS is a Rust library for cross-posting content to 16 social media platforms. It is a rewrite and expansion of the original JavaScript [crosspost](https://github.com/humanwhocodes/crosspost) library.
 
 **Repository:** GraftAI-com/crosspost-rs
-**License:** Polyform Shield 1.0.0
+**License:** MPL-2.0
 
 ## Build & Run
 

@@ -4,6 +4,8 @@ use crate::strategy::{get_images, PostResponse, Strategy};
 use crate::types::{LinkedInCredentials, PostOptions};
 use serde::{Deserialize, Serialize};
 
+const LINKEDIN_VERSION: &str = "202604";
+
 /// Strategy for posting to LinkedIn via the Share API.
 ///
 /// Supports image uploads via 3-step register/upload/post flow.
@@ -30,7 +32,6 @@ impl LinkedInStrategy {
         })
     }
 
-    /// Override the API base URL (for testing with mock servers).
     #[cfg(test)]
     pub(crate) fn with_api_base(mut self, base: String) -> Self {
         self.api_base = base;
@@ -42,75 +43,150 @@ impl LinkedInStrategy {
             access_token: required_env("LINKEDIN_ACCESS_TOKEN")?,
         })
     }
+
+    fn rest_headers(&self) -> reqwest::header::HeaderMap {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            "LinkedIn-Version",
+            LINKEDIN_VERSION.parse().expect("static version header"),
+        );
+        headers.insert(
+            "X-Restli-Protocol-Version",
+            "2.0.0".parse().expect("static protocol header"),
+        );
+        headers
+    }
+
+    async fn initialize_image_upload(
+        &self,
+        author_urn: &str,
+    ) -> Result<LinkedInInitializeUploadValue> {
+        let body = serde_json::json!({
+            "initializeUploadRequest": {
+                "owner": author_urn,
+            }
+        });
+
+        let response = self
+            .client
+            .post(format!(
+                "{}/rest/images?action=initializeUpload",
+                self.api_base
+            ))
+            .bearer_auth(&self.credentials.access_token)
+            .headers(self.rest_headers())
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| Error::Platform(format!("LinkedIn image init error: {}", e)))?;
+
+        if !response.status().is_success() {
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Error::Platform(format!(
+                "LinkedIn image init failed: {}",
+                error_text
+            )));
+        }
+
+        let parsed: LinkedInInitializeUploadResponse = response.json().await.map_err(|e| {
+            Error::Platform(format!("Failed to parse LinkedIn image init response: {}", e))
+        })?;
+
+        Ok(parsed.value)
+    }
+
+    async fn put_image_bytes(&self, upload_url: &str, data: &[u8]) -> Result<()> {
+        let upload_resp = self
+            .client
+            .put(upload_url)
+            .bearer_auth(&self.credentials.access_token)
+            .header("Content-Type", "image/*")
+            .body(data.to_vec())
+            .send()
+            .await
+            .map_err(|e| Error::Platform(format!("LinkedIn upload error: {}", e)))?;
+
+        if !upload_resp.status().is_success() {
+            let error_text = upload_resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(Error::Platform(format!(
+                "LinkedIn image upload failed: {}",
+                error_text
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+struct LinkedInInitializeUploadResponse {
+    value: LinkedInInitializeUploadValue,
+}
+
+#[derive(Deserialize)]
+struct LinkedInInitializeUploadValue {
+    image: String,
+    #[serde(rename = "uploadUrl")]
+    upload_url: String,
 }
 
 #[derive(Serialize)]
-struct LinkedInPostRequest {
+struct LinkedInPostsRequest {
     author: String,
+    commentary: String,
+    visibility: String,
+    distribution: LinkedInDistribution,
     #[serde(rename = "lifecycleState")]
     lifecycle_state: String,
-    #[serde(rename = "specificContent")]
-    specific_content: LinkedInSpecificContent,
-    visibility: LinkedInVisibility,
-}
-
-#[derive(Serialize)]
-struct LinkedInSpecificContent {
-    #[serde(rename = "com.linkedin.ugc.ShareContent")]
-    share_content: LinkedInShareContent,
-}
-
-#[derive(Serialize)]
-struct LinkedInShareContent {
-    #[serde(rename = "shareCommentary")]
-    share_commentary: LinkedInShareCommentary,
-    #[serde(rename = "shareMediaCategory")]
-    share_media_category: String,
+    #[serde(rename = "isReshareDisabledByAuthor")]
+    is_reshare_disabled_by_author: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    media: Option<Vec<LinkedInMedia>>,
+    content: Option<LinkedInPostContent>,
 }
 
 #[derive(Serialize)]
-struct LinkedInMedia {
-    status: String,
-    #[serde(rename = "originalUrl")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    original_url: Option<String>,
-    media: Option<String>,
-    title: Option<LinkedInMediaTitle>,
+struct LinkedInDistribution {
+    #[serde(rename = "feedDistribution")]
+    feed_distribution: String,
+    #[serde(rename = "targetEntities")]
+    target_entities: Vec<serde_json::Value>,
+    #[serde(rename = "thirdPartyDistributionChannels")]
+    third_party_distribution_channels: Vec<serde_json::Value>,
 }
 
 #[derive(Serialize)]
-struct LinkedInMediaTitle {
-    text: String,
-}
-
-#[derive(Deserialize)]
-struct LinkedInRegisterUploadResponse {
-    value: LinkedInRegisterUploadValue,
-}
-
-#[derive(Deserialize)]
-struct LinkedInRegisterUploadValue {
-    asset: String,
-    #[serde(rename = "uploadMechanism")]
-    upload_mechanism: serde_json::Value,
+#[serde(untagged)]
+enum LinkedInPostContent {
+    SingleImage { media: LinkedInSingleImage },
+    MultiImage {
+        #[serde(rename = "multiImage")]
+        multi_image: LinkedInMultiImageBlock,
+    },
 }
 
 #[derive(Serialize)]
-struct LinkedInShareCommentary {
-    text: String,
-}
-
-#[derive(Serialize)]
-struct LinkedInVisibility {
-    #[serde(rename = "com.linkedin.ugc.MemberNetworkVisibility")]
-    member_network_visibility: String,
-}
-
-#[derive(Deserialize)]
-struct LinkedInPostResponse {
+struct LinkedInSingleImage {
     id: String,
+    #[serde(rename = "altText")]
+    alt_text: String,
+}
+
+#[derive(Serialize)]
+struct LinkedInMultiImageBlock {
+    images: Vec<LinkedInMultiImageItem>,
+}
+
+#[derive(Serialize)]
+struct LinkedInMultiImageItem {
+    id: String,
+    #[serde(rename = "altText")]
+    alt_text: String,
 }
 
 #[derive(Deserialize)]
@@ -133,7 +209,6 @@ impl Strategy for LinkedInStrategy {
     }
 
     async fn post(&self, message: &str, options: Option<&PostOptions>) -> Result<PostResponse> {
-        // Get user's profile URN
         let profile = self
             .client
             .get(format!("{}/v2/userinfo", self.api_base))
@@ -161,116 +236,57 @@ impl Strategy for LinkedInStrategy {
         let author_urn = format!("urn:li:person:{}", profile_data.sub);
 
         let images = get_images(options);
-        let (media_category, media_list) = if !images.is_empty() {
-            let mut media_entries = Vec::new();
-            for img in images.iter().take(4) {
-                // Step 1: Register upload
-                let register_body = serde_json::json!({
-                    "registerUploadRequest": {
-                        "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
-                        "owner": author_urn,
-                        "serviceRelationships": [{
-                            "relationshipType": "OWNER",
-                            "identifier": "urn:li:userGeneratedContent"
-                        }]
-                    }
-                });
-
-                let register_resp = self
-                    .client
-                    .post(format!("{}/v2/assets?action=registerUpload", self.api_base))
-                    .bearer_auth(&self.credentials.access_token)
-                    .json(&register_body)
-                    .send()
-                    .await
-                    .map_err(|e| {
-                        Error::Platform(format!("LinkedIn upload register error: {}", e))
-                    })?;
-
-                if !register_resp.status().is_success() {
-                    let error_text = register_resp
-                        .text()
-                        .await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-                    return Err(Error::Platform(format!(
-                        "LinkedIn upload register failed: {}",
-                        error_text
-                    )));
-                }
-
-                let register_data: LinkedInRegisterUploadResponse =
-                    register_resp.json().await.map_err(|e| {
-                        Error::Platform(format!("Failed to parse register response: {}", e))
-                    })?;
-
-                // Step 2: Upload binary data
-                let upload_url = register_data
-                    .value
-                    .upload_mechanism
-                    .get("com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest")
-                    .and_then(|m| m.get("uploadUrl"))
-                    .and_then(|u| u.as_str())
-                    .ok_or_else(|| Error::Platform("Missing upload URL from LinkedIn".to_string()))?
-                    .to_string();
-
-                let upload_resp = self
-                    .client
-                    .put(&upload_url)
-                    .bearer_auth(&self.credentials.access_token)
-                    .header("Content-Type", "application/octet-stream")
-                    .body(img.data.clone())
-                    .send()
-                    .await
-                    .map_err(|e| Error::Platform(format!("LinkedIn upload error: {}", e)))?;
-
-                if !upload_resp.status().is_success() {
-                    let error_text = upload_resp
-                        .text()
-                        .await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-                    return Err(Error::Platform(format!(
-                        "LinkedIn image upload failed: {}",
-                        error_text
-                    )));
-                }
-
-                media_entries.push(LinkedInMedia {
-                    status: "READY".to_string(),
-                    original_url: None,
-                    media: Some(register_data.value.asset),
-                    title: img
-                        .alt
-                        .as_ref()
-                        .map(|a| LinkedInMediaTitle { text: a.clone() }),
-                });
-            }
-            ("IMAGE".to_string(), Some(media_entries))
+        let content = if images.is_empty() {
+            None
         } else {
-            ("NONE".to_string(), None)
+            let mut image_urns = Vec::new();
+            let mut alts = Vec::new();
+            for img in images.iter().take(4) {
+                let init = self.initialize_image_upload(&author_urn).await?;
+                self.put_image_bytes(&init.upload_url, &img.data).await?;
+                image_urns.push(init.image);
+                alts.push(img.alt.clone().unwrap_or_default());
+            }
+
+            if image_urns.len() == 1 {
+                Some(LinkedInPostContent::SingleImage {
+                    media: LinkedInSingleImage {
+                        id: image_urns[0].clone(),
+                        alt_text: alts[0].clone(),
+                    },
+                })
+            } else {
+                Some(LinkedInPostContent::MultiImage {
+                    multi_image: LinkedInMultiImageBlock {
+                        images: image_urns
+                            .into_iter()
+                            .zip(alts)
+                            .map(|(id, alt_text)| LinkedInMultiImageItem { id, alt_text })
+                            .collect(),
+                    },
+                })
+            }
         };
 
-        let body = LinkedInPostRequest {
+        let body = LinkedInPostsRequest {
             author: author_urn,
+            commentary: message.to_string(),
+            visibility: "PUBLIC".to_string(),
+            distribution: LinkedInDistribution {
+                feed_distribution: "MAIN_FEED".to_string(),
+                target_entities: Vec::new(),
+                third_party_distribution_channels: Vec::new(),
+            },
             lifecycle_state: "PUBLISHED".to_string(),
-            specific_content: LinkedInSpecificContent {
-                share_content: LinkedInShareContent {
-                    share_commentary: LinkedInShareCommentary {
-                        text: message.to_string(),
-                    },
-                    share_media_category: media_category,
-                    media: media_list,
-                },
-            },
-            visibility: LinkedInVisibility {
-                member_network_visibility: "PUBLIC".to_string(),
-            },
+            is_reshare_disabled_by_author: false,
+            content,
         };
 
         let response = self
             .client
-            .post(format!("{}/v2/ugcPosts", self.api_base))
+            .post(format!("{}/rest/posts", self.api_base))
             .bearer_auth(&self.credentials.access_token)
-            .header("X-Restli-Protocol-Version", "2.0.0")
+            .headers(self.rest_headers())
             .json(&body)
             .send()
             .await
@@ -287,16 +303,22 @@ impl Strategy for LinkedInStrategy {
             )));
         }
 
-        let li_response: LinkedInPostResponse = response
-            .json()
-            .await
-            .map_err(|e| Error::Platform(format!("Failed to parse LinkedIn response: {}", e)))?;
+        let post_id = response
+            .headers()
+            .get("x-restli-id")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                Error::Platform(
+                    "LinkedIn post response missing x-restli-id header".to_string(),
+                )
+            })?;
 
         Ok(PostResponse {
-            id: li_response.id.clone(),
+            id: post_id.clone(),
             url: Some(format!(
                 "https://www.linkedin.com/feed/update/{}",
-                li_response.id
+                post_id
             )),
         })
     }
@@ -317,9 +339,11 @@ impl Strategy for LinkedInStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::ImageEmbed;
     use crate::Strategy;
-    use wiremock::matchers::{method, path};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
     fn test_strategy() -> LinkedInStrategy {
         LinkedInStrategy::new(LinkedInCredentials {
@@ -363,10 +387,12 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/v2/ugcPosts"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
-                "id": "urn:li:share:123"
-            })))
+            .and(path("/rest/posts"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .append_header("x-restli-id", "urn:li:share:123")
+                    .set_body_string(""),
+            )
             .expect(1)
             .mount(&mock_server)
             .await;
@@ -385,6 +411,145 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_post_with_one_image() {
+        let mock_server = MockServer::start().await;
+        let upload_path = "/mock-upload";
+
+        Mock::given(method("GET"))
+            .and(path("/v2/userinfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "abc123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/images"))
+            .and(query_param("action", "initializeUpload"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "value": {
+                    "image": "urn:li:image:999",
+                    "uploadUrl": format!("{}{}", mock_server.uri(), upload_path)
+                }
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path(upload_path))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/posts"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .append_header("x-restli-id", "urn:li:share:777")
+                    .set_body_string(""),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let opts = PostOptions {
+            images: vec![ImageEmbed {
+                data: vec![1, 2, 3],
+                alt: Some("caption".into()),
+                mime_type: None,
+                image_url: None,
+            }],
+        };
+
+        let result = strategy
+            .post("Hello with pic", Some(&opts))
+            .await
+            .unwrap();
+        assert_eq!(result.id, "urn:li:share:777");
+    }
+
+    #[tokio::test]
+    async fn test_post_with_two_images() {
+        let mock_server = MockServer::start().await;
+        let upload_path = "/mock-upload";
+        let base = mock_server.uri();
+        let init_n = AtomicUsize::new(0);
+
+        Mock::given(method("GET"))
+            .and(path("/v2/userinfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "abc123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/images"))
+            .and(query_param("action", "initializeUpload"))
+            .respond_with(move |_req: &Request| {
+                let i = init_n.fetch_add(1, Ordering::SeqCst);
+                let image = if i == 0 {
+                    "urn:li:image:111"
+                } else {
+                    "urn:li:image:222"
+                };
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "value": {
+                        "image": image,
+                        "uploadUrl": format!("{}{}", base, upload_path)
+                    }
+                }))
+            })
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("PUT"))
+            .and(path(upload_path))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(2)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/posts"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .append_header("x-restli-id", "urn:li:share:888")
+                    .set_body_string(""),
+            )
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let opts = PostOptions {
+            images: vec![
+                ImageEmbed {
+                    data: vec![1],
+                    alt: Some("a".into()),
+                    mime_type: None,
+                    image_url: None,
+                },
+                ImageEmbed {
+                    data: vec![2],
+                    alt: Some("b".into()),
+                    mime_type: None,
+                    image_url: None,
+                },
+            ],
+        };
+
+        let result = strategy.post("Hi", Some(&opts)).await.unwrap();
+        assert_eq!(result.id, "urn:li:share:888");
+    }
+
+    #[tokio::test]
     async fn test_post_api_error() {
         let mock_server = MockServer::start().await;
 
@@ -398,7 +563,7 @@ mod tests {
             .await;
 
         Mock::given(method("POST"))
-            .and(path("/v2/ugcPosts"))
+            .and(path("/rest/posts"))
             .respond_with(ResponseTemplate::new(422).set_body_string("Unprocessable Entity"))
             .expect(1)
             .mount(&mock_server)
@@ -412,6 +577,35 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("LinkedIn API error"));
+    }
+
+    #[tokio::test]
+    async fn test_post_missing_restli_id() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/v2/userinfo"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "sub": "abc123"
+            })))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/rest/posts"))
+            .respond_with(ResponseTemplate::new(201).set_body_string(""))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let strategy = test_strategy().with_api_base(mock_server.uri());
+        let err = strategy.post("Hello!", None).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing x-restli-id"),
+            "{err}"
+        );
     }
 
     #[tokio::test]

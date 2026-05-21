@@ -2,9 +2,9 @@
 name = "crosspost"
 version = "0.1.2"
 edition = "2021"
-authors = ["Max Carter <undivisible@vk.com>"]
+authors = ["Max Carter <max@undivisible.dev>"]
 license = "MPL-2.0"
-repository = "https://github.com/tschk/crosspost-rs"
+repository = "https://github.com/arkiecompany/crosspost-rs"
 description = "Cross-post messages to multiple social media platforms"
 
 [features]
